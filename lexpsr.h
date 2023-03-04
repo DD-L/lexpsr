@@ -84,16 +84,23 @@ namespace _LEXPARSER_CORE
         virtual ~Context() {}
     }; // struct Context
 
-    class Seq
+    namespace details
+    {
+        struct DefaultClass
+        {
+            DefaultClass() = default;
+            DefaultClass(const DefaultClass&) = default;
+            DefaultClass(DefaultClass&&) = default;
+            DefaultClass& operator=(const DefaultClass&) = default;
+            DefaultClass& operator=(DefaultClass&&) = default;
+        };
+    } // namespace details;
+
+    class Seq : public details::DefaultClass
     {
         typedef Seq _Myt;
     public:
-        Seq() = default;
-        Seq(const _Myt&) = default;
-        Seq(_Myt&&) = default;
-
-        Seq& operator=(const _Myt&) = default;
-        Seq& operator=(_Myt&&) = default;
+        using details::DefaultClass::DefaultClass;
 
         explicit Seq(std::initializer_list<ScanFunc> member) : m_member(member) {}
 
@@ -130,16 +137,11 @@ namespace _LEXPARSER_CORE
         std::vector<ScanFunc>  m_member;
     }; // class Seq
 
-    class Branch
+    class Branch : public details::DefaultClass
     {
         typedef Branch _Myt;
     public:
-        Branch() = default;
-        Branch(const _Myt&) = default;
-        Branch(_Myt&&) = default;
-
-        Branch& operator=(const _Myt&) = default;
-        Branch& operator=(_Myt&&) = default;
+        using details::DefaultClass::DefaultClass;
 
         explicit Branch(std::initializer_list<ScanFunc> member) : m_member(member) {}
 
@@ -179,19 +181,14 @@ namespace _LEXPARSER_CORE
         std::vector<ScanFunc>  m_member;
     }; // class Branch
 
-    class Loop
+    class Loop : public details::DefaultClass
     {
         typedef Loop _Myt;
     public:
         enum : std::size_t { INF_CNT = ~static_cast<std::size_t>(0) };
 
     public:
-        Loop() = default;
-        Loop(const _Myt&) = default;
-        Loop(_Myt&&) = default;
-
-        Loop& operator=(const _Myt&) = default;
-        Loop& operator=(_Myt&&) = default;
+        using details::DefaultClass::DefaultClass;
 
         template <class Scanner>
         Loop(Scanner&& member, std::size_t min, std::size_t max) : m_min(min), m_max(max), m_member(std::forward<Scanner>(member))
@@ -251,20 +248,14 @@ namespace _LEXPARSER_CORE
     }; // class Loop
 
     // 三值布尔的逻辑非（第三态是 Fatal）。类似于负零宽断言: LogicNotScanner 不消耗字符，区别于“负字符集”，后者是消耗字符的
-    class LogicNotScanner
+    class LogicNotScanner : public details::DefaultClass
     {
     public:
-        LogicNotScanner() = default;
+        using details::DefaultClass::DefaultClass;
 
         template <class Scanner, class D = typename std::decay<Scanner>::type, 
             class = typename std::enable_if<!std::is_same<D, LogicNotScanner>::value>::type>
         explicit LogicNotScanner(Scanner&& scanner) : m_scanner(std::forward<Scanner>(scanner)) {}
-
-        LogicNotScanner(const LogicNotScanner&) = default;
-        LogicNotScanner(LogicNotScanner&&) = default;
-
-        LogicNotScanner& operator=(const LogicNotScanner&) = default;
-        LogicNotScanner& operator=(LogicNotScanner&&) = default;
 
         template <class Scanner>
         void AddMember(Scanner&& scanner)
@@ -348,19 +339,15 @@ namespace _LEXPARSER_CORE
         std::string m_err_msg;
     }; // class FatalIf
 
-    class ActionScanner
+    class ActionScanner : public details::DefaultClass
     {
     public:
+        using details::DefaultClass::DefaultClass;
+
         template <class Scanner, class ActionType>
         ActionScanner(Scanner&& scanner, ActionType&& action)
             : m_scanner(std::forward<Scanner>(scanner)), m_action(std::forward<ActionType>(action))
         {}
-
-        ActionScanner() = default;
-        ActionScanner(const ActionScanner&) = default;
-        ActionScanner(ActionScanner&&) = default;
-        ActionScanner& operator=(const ActionScanner&) = default;
-        ActionScanner& operator=(ActionScanner&&) = default;
 
         ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
         {
@@ -458,17 +445,14 @@ namespace _LEXPARSER_CORE
 
     namespace {  void range_v(details::Range*) {} }
 
-    class CharBranch
+    class CharBranch : public details::DefaultClass
     {
     public:
         typedef details::Range Range;
 
     public:
-        CharBranch() = default;
-        CharBranch(const CharBranch&) = default;
-        CharBranch(CharBranch&&) = default;
-        CharBranch& operator=(const CharBranch&) = default;
-        CharBranch& operator=(CharBranch&&) = default;
+        using details::DefaultClass::DefaultClass;
+
         explicit CharBranch(std::initializer_list<char> member) : CharBranch(false, member) {}   // set
         CharBranch(bool negative, std::initializer_list<char> member)                            // set
         {
@@ -909,7 +893,6 @@ namespace _LEXPARSER_SHELL
         {
             return Parser(lambdaPsr);
         }
-
     } // namespace  // free function
 
     template <class T> static inline T& _PsrForward(T& v) { return v; }

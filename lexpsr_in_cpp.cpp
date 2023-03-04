@@ -39,7 +39,7 @@ int test_core()
     std::string input = "2 + 4 = 7";
     ScanState ss = root(input.data(), input.size(), offset, ctx, err);
     assert(ScanState::OK == ss);
-
+    (void)ss;
 
     return 0;
 }
@@ -61,7 +61,7 @@ void test_shell()
     c = "ccc";
     d = "eeee";
     f = "ffff";
-    g = (a - b - c | d | f)[{2, 3}];  // - 的优先级要比 | 高
+    g = (a - b - c | d  - "xxxde"_psr | f)[{2, 3}];  // - 的优先级要比 | 高
 
 
     h = f[{ 2, 4 }];
