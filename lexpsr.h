@@ -50,7 +50,7 @@ namespace _LEXPARSER_CORE
         std::string to_std_string() const { return std::string(data, len); }
     }; // struct StrRef
 
-    namespace details { template <class ScanFunc> class ActionScannerImpl; }
+    //namespace details { template <class ScanFunc> class ActionScannerImpl; }
     struct Context; struct ActionMaterial;
     enum class ScanState
     {
@@ -60,7 +60,8 @@ namespace _LEXPARSER_CORE
     typedef std::function<ScanState(const char*, std::size_t, std::size_t&, Context&, std::string&)> ScanFunc;
     typedef std::function<bool(const ActionMaterial&, Context& ctx, std::string& err)>               Action; // 识别动作
 
-    typedef details::ActionScannerImpl<ScanFunc> ActionScanner;
+    //typedef details::ActionScannerImpl<ScanFunc> ActionScanner;
+    class ActionScanner;
 
     struct ActionMaterial
     {
@@ -83,347 +84,329 @@ namespace _LEXPARSER_CORE
         virtual ~Context() {}
     }; // struct Context
 
-    namespace details
+    class Seq
     {
-        template <class ScanFunc>
-        class SeqImpl
+        typedef Seq _Myt;
+    public:
+        Seq() = default;
+        Seq(const _Myt&) = default;
+
+        explicit Seq(std::initializer_list<ScanFunc> member) : m_member(member) {}
+
+        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
         {
-            typedef SeqImpl<ScanFunc> _Myt;
-        public:
-            SeqImpl() = default;
-            SeqImpl(const SeqImpl&) = default;
-
-            explicit SeqImpl(std::initializer_list<ScanFunc> member) : m_member(member) {}
-
-            ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
+            std::size_t oldOffset = offset;
+            for (const ScanFunc& sf : m_member)
             {
-                std::size_t oldOffset = offset;
-                for (const ScanFunc& sf : m_member)
+                ScanState ss = sf(data, len, offset, ctx, err);
+                if (ScanState::Dismatch == ss)
                 {
-                    ScanState ss = sf(data, len, offset, ctx, err);
-                    if (ScanState::Dismatch == ss)
-                    {
-                        offset = oldOffset;
-                        return ScanState::Dismatch;
-                    }
-
-                    if (ScanState::Fatal == ss)
-                    {
-                        return ScanState::Fatal;
-                    }
-                }
-
-                // 允许空串
-                ctx.m_scanner_info = m_member.size();
-                return ScanState::OK;
-            }
-
-            _Myt& AddMember(std::initializer_list<ScanFunc> member)
-            {
-                m_member.insert(m_member.end(), member.begin(), member.end());
-                return *this;
-            }
-
-        private:
-            std::vector<ScanFunc>  m_member;
-        }; // class SeqImpl
-
-        template <class ScanFunc>
-        class BranchImpl
-        {
-            typedef BranchImpl<ScanFunc> _Myt;
-        public:
-            BranchImpl() = default;
-            BranchImpl(const BranchImpl&) = default;
-
-            explicit BranchImpl(std::initializer_list<ScanFunc> member) : m_member(member) {}
-
-            _Myt& AddMember(std::initializer_list<ScanFunc> member)
-            {
-                m_member.insert(m_member.end(), member.begin(), member.end());
-                return *this;
-            }
-
-            ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
-            {
-                if (m_member.empty())
-                { // 允许空串
-                    return ScanState::OK;
-                }
-
-                std::size_t oldOffset = offset;
-                for (std::size_t i = 0; i < m_member.size(); ++i)
-                {
-                    const ScanFunc& sf = m_member[i];
-                    ScanState ss = sf(data, len, offset, ctx, err);
-                    if (ScanState::Dismatch != ss)
-                    {
-                        assert(ScanState::OK == ss || ScanState::Fatal == ss);
-                        ctx.m_scanner_info = i;
-                        return ss;
-                    }
-
                     offset = oldOffset;
+                    return ScanState::Dismatch;
                 }
 
-                assert(oldOffset == offset);
-                return ScanState::Dismatch;
-            }
-
-        private:
-            std::vector<ScanFunc>  m_member;
-        }; // class BranchImpl<ScanFunc> 
-
-        template <class ScanFunc>
-        class LoopImpl
-        {
-            typedef LoopImpl<ScanFunc> _Myt;
-        public:
-            enum : std::size_t { INF_CNT = ~static_cast<std::size_t>(0) };
-
-        public:
-            LoopImpl() = default;
-            LoopImpl(const LoopImpl&) = default;
-
-            template <class Scanner>
-            LoopImpl(Scanner&& member, std::size_t min, std::size_t max) : m_min(min), m_max(max), m_member(std::forward<Scanner>(member))
-            {
-                assert(m_min <= m_max);
-            }
-
-            ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
-            {
-                std::size_t oldOffset = offset;
-                for (std::size_t i = 0; i < m_min; ++i)
-                { // 必要条件： 满足最小循环次数
-                    ScanState ss = m_member(data, len, offset, ctx, err);
-                    if (ScanState::Dismatch == ss)
-                    {
-                        offset = oldOffset;
-                        return ScanState::Dismatch;
-                    }
-
-                    if (ScanState::Fatal == ss)
-                    {
-                        return ScanState::Fatal;
-                    }
-                }
-
-                std::size_t loop_cnt = m_min;
-                for (; loop_cnt < m_max; ++loop_cnt)
+                if (ScanState::Fatal == ss)
                 {
-                    oldOffset = offset;
-                    ScanState ss = m_member(data, len, offset, ctx, err);
-                    if (ScanState::OK != ss)
-                    {
-                        offset = oldOffset;
-                        break;
-                    }
-
-                    // @TODO 致命错误，也当失配处理？
+                    return ScanState::Fatal;
                 }
+            }
 
-                ctx.m_scanner_info = loop_cnt;
+            // 允许空串
+            ctx.m_scanner_info = m_member.size();
+            return ScanState::OK;
+        }
+
+        _Myt& AddMember(std::initializer_list<ScanFunc> member)
+        {
+            m_member.insert(m_member.end(), member.begin(), member.end());
+            return *this;
+        }
+
+    private:
+        std::vector<ScanFunc>  m_member;
+    }; // class Seq
+
+    class Branch
+    {
+        typedef Branch _Myt;
+    public:
+        Branch() = default;
+        Branch(const _Myt&) = default;
+
+        explicit Branch(std::initializer_list<ScanFunc> member) : m_member(member) {}
+
+        _Myt& AddMember(std::initializer_list<ScanFunc> member)
+        {
+            m_member.insert(m_member.end(), member.begin(), member.end());
+            return *this;
+        }
+
+        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
+        {
+            if (m_member.empty())
+            { // 允许空串
                 return ScanState::OK;
             }
 
-            _Myt& AddMember(const ScanFunc& member, std::size_t _min, std::size_t _max)
+            std::size_t oldOffset = offset;
+            for (std::size_t i = 0; i < m_member.size(); ++i)
             {
-                m_min = _min;
-                m_max = _max;
-                assert(m_min <= m_max);
-                m_member = member;
-                return *this;
-            }
-
-        private:
-            std::size_t m_min = 0;
-            std::size_t m_max = 0;
-            ScanFunc    m_member;
-        }; // class LoopImpl<ScanFunc>
-
-        // 三值布尔的逻辑非（第三态是 Fatal）。类似于负零宽断言: LogicNotScanner 不消耗字符，区别于“负字符集”，后者是消耗字符的
-        template <class ScanFunc>
-        class LogicNotScannerImpl
-        {
-        public:
-            LogicNotScannerImpl() = default;
-
-            template <class Scanner>
-            explicit LogicNotScannerImpl(Scanner&& scanner) : m_scanner(std::forward<Scanner>(scanner)) {}
-
-            LogicNotScannerImpl(const LogicNotScannerImpl&) = default;
-
-            template <class Scanner>
-            void AddMember(Scanner&& scanner)
-            {
-                m_scanner = std::forward<Scanner>(scanner);
-            }
-
-            ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
-            {
-                if (m_scanner)
+                const ScanFunc& sf = m_member[i];
+                ScanState ss = sf(data, len, offset, ctx, err);
+                if (ScanState::Dismatch != ss)
                 {
-                    std::size_t old_offset = offset;
-                    ScanState ss = m_scanner(data, len, offset, ctx, err);
-                    switch (ss)
-                    {
-                    case ScanState::OK:
-                        offset = old_offset;
-                        return ScanState::Dismatch;
-                    case ScanState::Dismatch:
-                        assert(offset == old_offset); // m_scanner 内部保证
-                        offset = old_offset;
-                        return ScanState::OK;
-                    default:
-                        return ScanState::Fatal;
-                    }
-                }
-
-                err = "logic_error: LogicNotScanner is empty";
-                return ScanState::Fatal;
-            }
-
-        private:
-            ScanFunc m_scanner;
-        }; // class LogicNotScanner<ScanFunc>
-
-        // 一旦匹配成功即触发 Fatal; 没有 OK 状态（不允许出现该 Scanner, 出现即 Fatal）
-        // 用于及早断言错误，同样不消耗字符。（比如进入一个无二义性的引导词之后的失配）
-        template <class ScanFunc>
-        class FatalIfImpl
-        {
-            typedef FatalIfImpl<ScanFunc> _Myt;
-        public:
-            template <class Scanner>
-            explicit FatalIfImpl(Scanner&& scanner, const std::string& err_msg) : m_scanner(std::forward<Scanner>(scanner)), m_err_msg(err_msg) {}
-
-            FatalIfImpl(const FatalIfImpl&) = default;
-
-            explicit FatalIfImpl(const std::string& err_msg = "") : m_err_msg(err_msg) {}
-
-            template <class Scanner>
-            _Myt& AddMember(Scanner&& scanner, const std::string& err_msg)
-            {
-                m_scanner = std::forward<Scanner>(scanner);
-                m_err_msg = err_msg;
-                return *this;
-            }
-
-            ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
-            {
-                if (m_scanner)
-                {
-                    std::size_t old_offset = offset;
-                    ScanState ss = m_scanner(data, len, offset, ctx, err);
-                    if (ScanState::OK == ss)
-                    {
-                        err += m_err_msg;
-                        offset = old_offset;
-                        return ScanState::Fatal;
-                    }
+                    assert(ScanState::OK == ss || ScanState::Fatal == ss);
+                    ctx.m_scanner_info = i;
                     return ss;
                 }
-                err = "logic_error: FatalIf is empty";
-                return ScanState::Fatal; // 无效 Scanner, 无条件 Fatal
+
+                offset = oldOffset;
             }
 
-        private:
-            ScanFunc    m_scanner; // cond
-            std::string m_err_msg;
-        }; // class FatalIfImpl<ScanFunc>
+            assert(oldOffset == offset);
+            return ScanState::Dismatch;
+        }
 
-        template <class ScanFunc>
-        class ActionScannerImpl
+    private:
+        std::vector<ScanFunc>  m_member;
+    }; // class Branch
+
+    class Loop
+    {
+        typedef Loop _Myt;
+    public:
+        enum : std::size_t { INF_CNT = ~static_cast<std::size_t>(0) };
+
+    public:
+        Loop() = default;
+        Loop(const _Myt&) = default;
+
+        template <class Scanner>
+        Loop(Scanner&& member, std::size_t min, std::size_t max) : m_min(min), m_max(max), m_member(std::forward<Scanner>(member))
         {
-        public:
-            template <class Scanner, class ActionType>
-            ActionScannerImpl(Scanner&& scanner, ActionType&& action)
-                : m_scanner(std::forward<Scanner>(scanner)), m_action(std::forward<ActionType>(action))
-            {}
+            assert(m_min <= m_max);
+        }
 
-            ActionScannerImpl() = default;
-            ActionScannerImpl(const ActionScannerImpl&) = default;
-
-            ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
-            {
-                if (!m_scanner)
-                { // 纯 Action
-                    const char* begin = data + offset;
-                    ctx.m_lazy_action.emplace_back(ActionMaterial{ StrRef{begin, begin}, ctx.m_scanner_info, this });
-                    return ScanState::OK;
+        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
+        {
+            std::size_t oldOffset = offset;
+            for (std::size_t i = 0; i < m_min; ++i)
+            { // 必要条件： 满足最小循环次数
+                ScanState ss = m_member(data, len, offset, ctx, err);
+                if (ScanState::Dismatch == ss)
+                {
+                    offset = oldOffset;
+                    return ScanState::Dismatch;
                 }
 
-                std::size_t old_lazy_cnt = ctx.m_lazy_action.size();
-                const char* begin = data + offset;
+                if (ScanState::Fatal == ss)
+                {
+                    return ScanState::Fatal;
+                }
+            }
+
+            std::size_t loop_cnt = m_min;
+            for (; loop_cnt < m_max; ++loop_cnt)
+            {
+                oldOffset = offset;
+                ScanState ss = m_member(data, len, offset, ctx, err);
+                if (ScanState::OK != ss)
+                {
+                    offset = oldOffset;
+                    break;
+                }
+
+                // @TODO 致命错误，也当失配处理？
+            }
+
+            ctx.m_scanner_info = loop_cnt;
+            return ScanState::OK;
+        }
+
+        _Myt& AddMember(const ScanFunc& member, std::size_t _min, std::size_t _max)
+        {
+            m_min = _min;
+            m_max = _max;
+            assert(m_min <= m_max);
+            m_member = member;
+            return *this;
+        }
+
+    private:
+        std::size_t m_min = 0;
+        std::size_t m_max = 0;
+        ScanFunc    m_member;
+    }; // class Loop
+
+    // 三值布尔的逻辑非（第三态是 Fatal）。类似于负零宽断言: LogicNotScanner 不消耗字符，区别于“负字符集”，后者是消耗字符的
+    class LogicNotScanner
+    {
+    public:
+        LogicNotScanner() = default;
+
+        template <class Scanner>
+        explicit LogicNotScanner(Scanner&& scanner) : m_scanner(std::forward<Scanner>(scanner)) {}
+
+        LogicNotScanner(const LogicNotScanner&) = default;
+
+        template <class Scanner>
+        void AddMember(Scanner&& scanner)
+        {
+            m_scanner = std::forward<Scanner>(scanner);
+        }
+
+        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
+        {
+            if (m_scanner)
+            {
+                std::size_t old_offset = offset;
+                ScanState ss = m_scanner(data, len, offset, ctx, err);
+                switch (ss)
+                {
+                case ScanState::OK:
+                    offset = old_offset;
+                    return ScanState::Dismatch;
+                case ScanState::Dismatch:
+                    assert(offset == old_offset); // m_scanner 内部保证
+                    offset = old_offset;
+                    return ScanState::OK;
+                default:
+                    return ScanState::Fatal;
+                }
+            }
+
+            err = "logic_error: LogicNotScanner is empty";
+            return ScanState::Fatal;
+        }
+
+    private:
+        ScanFunc m_scanner;
+    }; // class LogicNotScanner
+
+    // 一旦匹配成功即触发 Fatal; 没有 OK 状态（不允许出现该 Scanner, 出现即 Fatal）
+    // 用于及早断言错误，同样不消耗字符。（比如进入一个无二义性的引导词之后的失配）
+    class FatalIf
+    {
+        typedef FatalIf _Myt;
+    public:
+        template <class Scanner>
+        explicit FatalIf(Scanner&& scanner, const std::string& err_msg) : m_scanner(std::forward<Scanner>(scanner)), m_err_msg(err_msg) {}
+
+        FatalIf(const _Myt&) = default;
+
+        explicit FatalIf(const std::string& err_msg = "") : m_err_msg(err_msg) {}
+
+        template <class Scanner>
+        _Myt& AddMember(Scanner&& scanner, const std::string& err_msg)
+        {
+            m_scanner = std::forward<Scanner>(scanner);
+            m_err_msg = err_msg;
+            return *this;
+        }
+
+        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
+        {
+            if (m_scanner)
+            {
+                std::size_t old_offset = offset;
                 ScanState ss = m_scanner(data, len, offset, ctx, err);
                 if (ScanState::OK == ss)
                 {
-                    const char* end = data + offset;
-                    ctx.m_lazy_action.emplace_back(ActionMaterial{ StrRef{ begin, end }, ctx.m_scanner_info, this });
+                    err += m_err_msg;
+                    offset = old_offset;
+                    return ScanState::Fatal;
                 }
-                else if (ScanState::Dismatch == ss)
-                {
-                    ctx.m_lazy_action.resize(old_lazy_cnt);
-                }
-
-                return ss; // 原样抛出
+                return ss;
             }
+            err = "logic_error: FatalIf is empty";
+            return ScanState::Fatal; // 无效 Scanner, 无条件 Fatal
+        }
 
-            bool InvokeAction(const ActionMaterial& am, Context& ctx, std::string& err) const noexcept
-            {
-                if (m_action)
-                {
-                    return m_action(am, ctx, err);
-                }
-                return true; // 兼容 “空 Action”
-            }
+    private:
+        ScanFunc    m_scanner; // cond
+        std::string m_err_msg;
+    }; // class FatalIf
 
-        private:
-            ScanFunc    m_scanner;
-            Action      m_action;
-        }; // class ActionScannerImpl<ScanFunc>
+    class ActionScanner
+    {
+    public:
+        template <class Scanner, class ActionType>
+        ActionScanner(Scanner&& scanner, ActionType&& action)
+            : m_scanner(std::forward<Scanner>(scanner)), m_action(std::forward<ActionType>(action))
+        {}
 
-        template <class ScanFunc>
-        class PreparedScannerImpl
+        ActionScanner() = default;
+        ActionScanner(const ActionScanner&) = default;
+
+        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
         {
-        public:
-            PreparedScannerImpl() : m_scanner(std::make_shared<ScanFunc>()) {}
-
-            PreparedScannerImpl(const PreparedScannerImpl&) = default;
-
-            ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
-            {
-                assert(m_scanner);
-                return (*m_scanner)(data, len, offset, ctx, err);
+            if (!m_scanner)
+            { // 纯 Action
+                const char* begin = data + offset;
+                ctx.m_lazy_action.emplace_back(ActionMaterial{ StrRef{begin, begin}, ctx.m_scanner_info, this });
+                return ScanState::OK;
             }
 
-            template <class T, class... Args>
-            void ReshapePlacement(Args&&... args)
+            std::size_t old_lazy_cnt = ctx.m_lazy_action.size();
+            const char* begin = data + offset;
+            ScanState ss = m_scanner(data, len, offset, ctx, err);
+            if (ScanState::OK == ss)
             {
-                assert(m_scanner);
-                *m_scanner = T(std::forward<Args>(args)...);
+                const char* end = data + offset;
+                ctx.m_lazy_action.emplace_back(ActionMaterial{ StrRef{ begin, end }, ctx.m_scanner_info, this });
+            }
+            else if (ScanState::Dismatch == ss)
+            {
+                ctx.m_lazy_action.resize(old_lazy_cnt);
             }
 
-            template <class T>
-            void Reshape(T&& scanner)
+            return ss; // 原样抛出
+        }
+
+        bool InvokeAction(const ActionMaterial& am, Context& ctx, std::string& err) const noexcept
+        {
+            if (m_action)
             {
-                assert(m_scanner);
-                *m_scanner = std::forward<T>(scanner);
+                return m_action(am, ctx, err);
             }
+            return true; // 兼容 “空 Action”
+        }
 
-        private:
-            std::shared_ptr<ScanFunc>   m_scanner;
-        }; // class PreparedScannerImpl<ScanFunc>
-    } // namespace details
+    private:
+        ScanFunc    m_scanner;
+        Action      m_action;
+    }; // class ActionScanner
 
-    typedef details::SeqImpl<ScanFunc>               Seq;
-    typedef details::BranchImpl<ScanFunc>            Branch;
-    typedef details::LoopImpl<ScanFunc>              Loop;
-    typedef details::LogicNotScannerImpl<ScanFunc>   LogicNotScanner;
-    typedef details::FatalIfImpl<ScanFunc>           FatalIf;
-    // typedef details::ActionScannerImpl<ScanFunc>     ActionScanner;
-    typedef details::PreparedScannerImpl<ScanFunc>   PreparedScanner;
+    class PreparedScanner
+    {
+    public:
+        PreparedScanner() : m_scanner(std::make_shared<ScanFunc>()) {}
+
+        PreparedScanner(const PreparedScanner&) = default;
+
+        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
+        {
+            assert(m_scanner);
+            return (*m_scanner)(data, len, offset, ctx, err);
+        }
+
+        template <class T, class... Args>
+        void ReshapePlacement(Args&&... args)
+        {
+            assert(m_scanner);
+            *m_scanner = T(std::forward<Args>(args)...);
+        }
+
+        template <class T>
+        void Reshape(T&& scanner)
+        {
+            assert(m_scanner);
+            *m_scanner = std::forward<T>(scanner);
+        }
+
+    private:
+        std::shared_ptr<ScanFunc>   m_scanner;
+    }; // class PreparedScanner
 
     struct AtMost1 : Loop
     {
