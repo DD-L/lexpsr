@@ -57,7 +57,7 @@ void test_shell()
     psr(m); psr(n); psr(o);
 
     psr(a) = "abc";
-    b = "bbb" << [](const lexpsr_core::ActionMaterial&, lexpsr_core::Context&, std::string&) -> bool { return true; };
+    b = "bbb" << [](const core::ActionMaterial&, core::Context&, std::string&) -> bool { return true; };
     c = "ccc";
     d = "eeee";
     f = "ffff";
@@ -65,13 +65,13 @@ void test_shell()
 
 
     h = f[{ 2, 4 }];
-    i = set("qazwsxwdc") << [](const lexpsr_core::ActionMaterial&, lexpsr_core::Context&, std::string&) -> bool { return true; };
+    i = set("qazwsxwdc") << [](const core::ActionMaterial&, core::Context&, std::string&) -> bool { return true; };
     j = range('0', '9')('a', 'z')('A', 'Z')[{2, 2}];
 
     k = _not(h) | a;           // 逻辑非
     l = fatal_if(j, "errMsg"); // 致命错误
-    m = $([](const char*, std::size_t, std::size_t&, lexpsr_core::Context&, std::string&) {
-        return lexpsr_core::ScanState::OK;
+    m = $([](const char*, std::size_t, std::size_t&, core::Context&, std::string&) {
+        return core::ScanState::OK;
     })[{2, 4}];    // 自由函数
     n = "xxx"_psr[any_cnt] | "xxxx"_psr[loop_cnt(3)] | "xx"_psr[at_least_1] | "eee"_psr[at_least(5)] | "sddd"_psr[at_most_1] | "ewrwe"_psr[at_most(5u)] | c[loop_cnt(3, 6)][{2, 3}];
 
@@ -103,7 +103,7 @@ void test_shell()
 //    using namespace lexpsr_shell;
 //
 //    psr(a); psr(b); psr(c);
-//    auto ac = [](const lexpsr_core::ActionMaterial&, lexpsr_core::Context&, std::string&) { return true; };
+//    auto ac = [](const core::ActionMaterial&, core::Context&, std::string&) { return true; };
 //    a = "abc" << ac << ac;
 //}
 
