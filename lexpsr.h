@@ -90,6 +90,10 @@ namespace _LEXPARSER_CORE
     public:
         Seq() = default;
         Seq(const _Myt&) = default;
+        Seq(_Myt&&) = default;
+
+        Seq& operator=(const _Myt&) = default;
+        Seq& operator=(_Myt&&) = default;
 
         explicit Seq(std::initializer_list<ScanFunc> member) : m_member(member) {}
 
@@ -132,6 +136,10 @@ namespace _LEXPARSER_CORE
     public:
         Branch() = default;
         Branch(const _Myt&) = default;
+        Branch(_Myt&&) = default;
+
+        Branch& operator=(const _Myt&) = default;
+        Branch& operator=(_Myt&&) = default;
 
         explicit Branch(std::initializer_list<ScanFunc> member) : m_member(member) {}
 
@@ -180,6 +188,10 @@ namespace _LEXPARSER_CORE
     public:
         Loop() = default;
         Loop(const _Myt&) = default;
+        Loop(_Myt&&) = default;
+
+        Loop& operator=(const _Myt&) = default;
+        Loop& operator=(_Myt&&) = default;
 
         template <class Scanner>
         Loop(Scanner&& member, std::size_t min, std::size_t max) : m_min(min), m_max(max), m_member(std::forward<Scanner>(member))
@@ -244,10 +256,15 @@ namespace _LEXPARSER_CORE
     public:
         LogicNotScanner() = default;
 
-        template <class Scanner>
+        template <class Scanner, class D = typename std::decay<Scanner>::type, 
+            class = typename std::enable_if<!std::is_same<D, LogicNotScanner>::value>::type>
         explicit LogicNotScanner(Scanner&& scanner) : m_scanner(std::forward<Scanner>(scanner)) {}
 
         LogicNotScanner(const LogicNotScanner&) = default;
+        LogicNotScanner(LogicNotScanner&&) = default;
+
+        LogicNotScanner& operator=(const LogicNotScanner&) = default;
+        LogicNotScanner& operator=(LogicNotScanner&&) = default;
 
         template <class Scanner>
         void AddMember(Scanner&& scanner)
@@ -293,6 +310,10 @@ namespace _LEXPARSER_CORE
         explicit FatalIf(Scanner&& scanner, const std::string& err_msg) : m_scanner(std::forward<Scanner>(scanner)), m_err_msg(err_msg) {}
 
         FatalIf(const _Myt&) = default;
+        FatalIf(_Myt&&) = default;
+
+        FatalIf& operator=(const _Myt&) = default;
+        FatalIf& operator=(_Myt&&) = default;
 
         explicit FatalIf(const std::string& err_msg = "") : m_err_msg(err_msg) {}
 
@@ -337,6 +358,9 @@ namespace _LEXPARSER_CORE
 
         ActionScanner() = default;
         ActionScanner(const ActionScanner&) = default;
+        ActionScanner(ActionScanner&&) = default;
+        ActionScanner& operator=(const ActionScanner&) = default;
+        ActionScanner& operator=(ActionScanner&&) = default;
 
         ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
         {
@@ -383,6 +407,10 @@ namespace _LEXPARSER_CORE
         PreparedScanner() : m_scanner(std::make_shared<ScanFunc>()) {}
 
         PreparedScanner(const PreparedScanner&) = default;
+        PreparedScanner(PreparedScanner&&) = default;
+
+        PreparedScanner& operator=(const PreparedScanner&) = default;
+        PreparedScanner& operator=(PreparedScanner&&) = default;
 
         ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
         {
@@ -412,6 +440,9 @@ namespace _LEXPARSER_CORE
     {
         AtMost1() = default;
         AtMost1(const AtMost1&) = default;
+        AtMost1(AtMost1&&) = default;
+        AtMost1& operator=(const AtMost1&) = default;
+        AtMost1& operator=(AtMost1&&) = default;
         explicit AtMost1(const ScanFunc& member) : Loop(member, 0, 1u) {}
 
         void AddMember(const ScanFunc& member)
@@ -435,6 +466,9 @@ namespace _LEXPARSER_CORE
     public:
         CharBranch() = default;
         CharBranch(const CharBranch&) = default;
+        CharBranch(CharBranch&&) = default;
+        CharBranch& operator=(const CharBranch&) = default;
+        CharBranch& operator=(CharBranch&&) = default;
         explicit CharBranch(std::initializer_list<char> member) : CharBranch(false, member) {}   // set
         CharBranch(bool negative, std::initializer_list<char> member)                            // set
         {
@@ -527,6 +561,10 @@ namespace _LEXPARSER_CORE
     public:
         explicit Token(const std::string& tok) : m_tok(tok) {}
         Token(const Token&) = default;
+        Token(Token&&) = default;
+        Token& operator=(const Token&) = default;
+        Token& operator=(Token&&) = default;
+
         ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context&, std::string&) const noexcept
         {
             if (m_tok.size() + offset > len)
@@ -695,6 +733,8 @@ namespace _LEXPARSER_SHELL
 
         Parser(const Parser&) = default;
         Parser(Parser&&) = default;
+        //Parser& operator=(const Parser&) = default;
+        Parser& operator=(Parser&&) = default;
 
     public:
         void operator=(const std::string& expr) noexcept
@@ -709,7 +749,10 @@ namespace _LEXPARSER_SHELL
             return (*this) = std::string(arr);
         }
 
-        template <class T, class = typename std::enable_if<!std::is_same<UnbindPsr, T>::value>::type>
+        template <class T, 
+            //class = typename std::enable_if<!std::is_same<UnbindPsr, T>::value>::type>
+            class = typename std::enable_if<!std::is_same<UnbindPsr, T>::value>::type,
+            class = std::void_t<decltype(std::declval<VariantParser>() = std::declval<T>())>>
         void operator=(const T& expr) noexcept
         {
             m_psr = expr;
@@ -719,7 +762,6 @@ namespace _LEXPARSER_SHELL
         {
             if (this != &expr)
             {
-                //assert(expr.m_name.empty());
                 assert(!m_name.empty());
                 m_psr = expr.m_psr;
             }
@@ -817,15 +859,15 @@ namespace _LEXPARSER_SHELL
             return Parser(ActionPsr{ Parser(LiteralStringPsr{str}), action });
         }
 
-        [[maybe_unused]] Parser operator"" _psr(const char* str, std::size_t)
-        {
-            return Parser(LiteralStringPsr{ str });
-        }
-
         template <class T>
         [[maybe_unused]] Parser operator<<(const T& expr, const Action& action)
         { // 对与 T 类型的约束，Expr 的构造函数会出手
             return Parser(ActionPsr{ Parser(expr), action });
+        }
+
+        [[maybe_unused]] Parser operator"" _psr(const char* str, std::size_t)
+        {
+            return Parser(LiteralStringPsr{ str });
         }
 
         [[maybe_unused]] Parser set(const std::string& s)
