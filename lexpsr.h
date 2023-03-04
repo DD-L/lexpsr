@@ -797,73 +797,73 @@ namespace _LEXPARSER_SHELL
 
     namespace // free function
     {
-        Parser operator-(const Parser& a, const Parser& b) // _LXP_SEQUENCE_CONCATENATION_CHARACTER
+        [[maybe_unused]] Parser operator-(const Parser& a, const Parser& b) // _LXP_SEQUENCE_CONCATENATION_CHARACTER
         {
             return (details::_MakeSeqOrBranchPair<SequencePsr>(a, b));
         }
-        Parser operator, (const Parser& a, const Parser& b)
+        [[maybe_unused]] Parser operator, (const Parser& a, const Parser& b)
         {
             return (a - b); // 序列连接兼容 ‘-’ 与 ‘,’ 只是它们的优先级不同
         }
 
         // | 也是与 , 类似
-        Parser operator|(const Parser& a, const Parser& b)
+        [[maybe_unused]] Parser operator|(const Parser& a, const Parser& b)
         {
             return details::_MakeSeqOrBranchPair<BranchPsr>(a, b);
         }
 
-        Parser operator<<(const std::string& str, const Action& action)
+        [[maybe_unused]] Parser operator<<(const std::string& str, const Action& action)
         {
             return Parser(ActionPsr{ Parser(LiteralStringPsr{str}), action });
         }
 
-        Parser operator"" _psr(const char* str, std::size_t)
+        [[maybe_unused]] Parser operator"" _psr(const char* str, std::size_t)
         {
             return Parser(LiteralStringPsr{ str });
         }
 
         template <class T>
-        Parser operator<<(const T& expr, const Action& action)
+        [[maybe_unused]] Parser operator<<(const T& expr, const Action& action)
         { // 对与 T 类型的约束，Expr 的构造函数会出手
             return Parser(ActionPsr{ Parser(expr), action });
         }
 
-        Parser set(const std::string& s)
+        [[maybe_unused]] Parser set(const std::string& s)
         {
             return Parser(CharSetPsr(s));
         }
 
-        Parser range(char b, char e)
+        [[maybe_unused]] Parser range(char b, char e)
         {
             //return Parser(CharRangePsr(b, e));
             return Parser(CharSetPsr(core::range_v, std::make_pair(b, e)));
         }
 
-        Parser range(const std::pair<char, char>& pair)
+        [[maybe_unused]] Parser range(const std::pair<char, char>& pair)
         {
             return range(pair.first, pair.second);
         }
 
-        Parser _not(const Parser& expr)
+        [[maybe_unused]] Parser _not(const Parser& expr)
         { // 函数名添加 _ 前缀是为了避免与 not 操作符冲突
             return Parser(NotPsr(expr));
         }
 
-        Parser fatal_if(const Parser& expr, const std::string& errMsg = "")
+        [[maybe_unused]] Parser fatal_if(const Parser& expr, const std::string& errMsg = "")
         {
             return Parser(FatalPsr(expr, errMsg));
         }
 
         // nop
-        Parser nop(NopPsr());
+        [[maybe_unused]] Parser nop = Parser(NopPsr());
 
-        Parser $(const Scanner& scan)
+        [[maybe_unused]] Parser $(const Scanner& scan)
         {
             //return Parser(Scanner(std::forward<scanner_t>(scan)));
             return Parser(scan);
         }
 
-        Parser $(const LambdaPsr& lambdaPsr)
+        [[maybe_unused]] Parser $(const LambdaPsr& lambdaPsr)
         {
             return Parser(lambdaPsr);
         }
