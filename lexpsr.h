@@ -25,13 +25,11 @@
 #define psr(var) Parser var(#var); _PsrForward(var)
 #endif // ! psr
 
-namespace _LEXPARSER_CORE
-{
+namespace _LEXPARSER_CORE {
     template <class... Args>
     static inline void _Unused(Args&&...) {}
 
-    struct StrRef
-    {
+    struct StrRef {
         const char* data = nullptr;
         std::size_t len = 0;
 
@@ -50,44 +48,34 @@ namespace _LEXPARSER_CORE
         std::string to_std_string() const { return std::string(data, len); }
     }; // struct StrRef
 
-    //namespace details { template <class ScanFunc> class ActionScannerImpl; }
-    struct Context; struct ActionMaterial;
-    enum class ScanState
-    {
+    struct Context; 
+    struct ActionMaterial;
+    class ActionScanner;
+
+    enum class ScanState {
         OK = 0, Dismatch, Fatal // 进入引导词之后的失配即 Fatal
     };
 
     typedef std::function<ScanState(const char*, std::size_t, std::size_t&, Context&, std::string&)> ScanFunc;
     typedef std::function<bool(const ActionMaterial&, Context& ctx, std::string& err)>               Action; // 识别动作
 
-    //typedef details::ActionScannerImpl<ScanFunc> ActionScanner;
-    class ActionScanner;
-
-    struct ActionMaterial
-    {
+    struct ActionMaterial {
         const StrRef         m_token;
         std::size_t          m_scanner_info = 0; // just for loop cnt
         const ActionScanner* m_action_scanner = nullptr;
     };
 
-    struct Context
-    {
-    public:
+    struct Context {
         union {
             std::size_t     m_scanner_info = 0;
             uint64_t        m_int_temp_in_lazy; // 仅在 lazy action 中使用
         };
 
         std::vector<ActionMaterial>  m_lazy_action;
-
-    public:
-        virtual ~Context() {}
     }; // struct Context
 
-    namespace details
-    {
-        struct DefaultClass
-        {
+    namespace details {
+        struct DefaultClass {
             DefaultClass() = default;
             DefaultClass(const DefaultClass&) = default;
             DefaultClass(DefaultClass&&) = default;
@@ -96,28 +84,21 @@ namespace _LEXPARSER_CORE
         };
     } // namespace details;
 
-    class Seq : public details::DefaultClass
-    {
-        typedef Seq _Myt;
+    class Seq : public details::DefaultClass {
     public:
         using details::DefaultClass::DefaultClass;
-
         explicit Seq(std::initializer_list<ScanFunc> member) : m_member(member) {}
 
-        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
-        {
+        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept {
             std::size_t oldOffset = offset;
-            for (const ScanFunc& sf : m_member)
-            {
+            for (const ScanFunc& sf : m_member) {
                 ScanState ss = sf(data, len, offset, ctx, err);
-                if (ScanState::Dismatch == ss)
-                {
+                if (ScanState::Dismatch == ss) {
                     offset = oldOffset;
                     return ScanState::Dismatch;
                 }
 
-                if (ScanState::Fatal == ss)
-                {
+                if (ScanState::Fatal == ss) {
                     return ScanState::Fatal;
                 }
             }
@@ -127,8 +108,7 @@ namespace _LEXPARSER_CORE
             return ScanState::OK;
         }
 
-        _Myt& AddMember(std::initializer_list<ScanFunc> member)
-        {
+        Seq& AddMember(std::initializer_list<ScanFunc> member) {
             m_member.insert(m_member.end(), member.begin(), member.end());
             return *this;
         }
@@ -137,34 +117,26 @@ namespace _LEXPARSER_CORE
         std::vector<ScanFunc>  m_member;
     }; // class Seq
 
-    class Branch : public details::DefaultClass
-    {
-        typedef Branch _Myt;
+    class Branch : public details::DefaultClass {
     public:
         using details::DefaultClass::DefaultClass;
-
         explicit Branch(std::initializer_list<ScanFunc> member) : m_member(member) {}
 
-        _Myt& AddMember(std::initializer_list<ScanFunc> member)
-        {
+        Branch& AddMember(std::initializer_list<ScanFunc> member) {
             m_member.insert(m_member.end(), member.begin(), member.end());
             return *this;
         }
 
-        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
-        {
-            if (m_member.empty())
-            { // 允许空串
+        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept {
+            if (m_member.empty()) { // 允许空串
                 return ScanState::OK;
             }
 
             std::size_t oldOffset = offset;
-            for (std::size_t i = 0; i < m_member.size(); ++i)
-            {
+            for (std::size_t i = 0; i < m_member.size(); ++i) {
                 const ScanFunc& sf = m_member[i];
                 ScanState ss = sf(data, len, offset, ctx, err);
-                if (ScanState::Dismatch != ss)
-                {
+                if (ScanState::Dismatch != ss) {
                     assert(ScanState::OK == ss || ScanState::Fatal == ss);
                     ctx.m_scanner_info = i;
                     return ss;
@@ -181,9 +153,7 @@ namespace _LEXPARSER_CORE
         std::vector<ScanFunc>  m_member;
     }; // class Branch
 
-    class Loop : public details::DefaultClass
-    {
-        typedef Loop _Myt;
+    class Loop : public details::DefaultClass {
     public:
         enum : std::size_t { INF_CNT = ~static_cast<std::size_t>(0) };
 
@@ -191,40 +161,33 @@ namespace _LEXPARSER_CORE
         using details::DefaultClass::DefaultClass;
 
         template <class Scanner>
-        Loop(Scanner&& member, std::size_t min, std::size_t max) : m_min(min), m_max(max), m_member(std::forward<Scanner>(member))
-        {
+        Loop(Scanner&& member, std::size_t min, std::size_t max) 
+            : m_min(min), m_max(max), m_member(std::forward<Scanner>(member)) {
             assert(m_min <= m_max);
         }
 
-        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
-        {
+        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept {
             std::size_t oldOffset = offset;
-            for (std::size_t i = 0; i < m_min; ++i)
-            { // 必要条件： 满足最小循环次数
+            for (std::size_t i = 0; i < m_min; ++i) { // 必要条件： 满足最小循环次数
                 ScanState ss = m_member(data, len, offset, ctx, err);
-                if (ScanState::Dismatch == ss)
-                {
+                if (ScanState::Dismatch == ss) {
                     offset = oldOffset;
                     return ScanState::Dismatch;
                 }
 
-                if (ScanState::Fatal == ss)
-                {
+                if (ScanState::Fatal == ss) {
                     return ScanState::Fatal;
                 }
             }
 
             std::size_t loop_cnt = m_min;
-            for (; loop_cnt < m_max; ++loop_cnt)
-            {
+            for (; loop_cnt < m_max; ++loop_cnt) {
                 oldOffset = offset;
                 ScanState ss = m_member(data, len, offset, ctx, err);
-                if (ScanState::OK != ss)
-                {
+                if (ScanState::OK != ss) {
                     offset = oldOffset;
                     break;
                 }
-
                 // @TODO 致命错误，也当失配处理？
             }
 
@@ -232,8 +195,7 @@ namespace _LEXPARSER_CORE
             return ScanState::OK;
         }
 
-        _Myt& AddMember(const ScanFunc& member, std::size_t _min, std::size_t _max)
-        {
+        Loop& AddMember(const ScanFunc& member, std::size_t _min, std::size_t _max) {
             m_min = _min;
             m_max = _max;
             assert(m_min <= m_max);
@@ -248,8 +210,7 @@ namespace _LEXPARSER_CORE
     }; // class Loop
 
     // 三值布尔的逻辑非（第三态是 Fatal）。类似于负零宽断言: LogicNotScanner 不消耗字符，区别于“负字符集”，后者是消耗字符的
-    class LogicNotScanner : public details::DefaultClass
-    {
+    class LogicNotScanner : public details::DefaultClass {
     public:
         using details::DefaultClass::DefaultClass;
 
@@ -258,19 +219,15 @@ namespace _LEXPARSER_CORE
         explicit LogicNotScanner(Scanner&& scanner) : m_scanner(std::forward<Scanner>(scanner)) {}
 
         template <class Scanner>
-        void AddMember(Scanner&& scanner)
-        {
+        void AddMember(Scanner&& scanner) {
             m_scanner = std::forward<Scanner>(scanner);
         }
 
-        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
-        {
-            if (m_scanner)
-            {
+        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept {
+            if (m_scanner) {
                 std::size_t old_offset = offset;
                 ScanState ss = m_scanner(data, len, offset, ctx, err);
-                switch (ss)
-                {
+                switch (ss) {
                 case ScanState::OK:
                     offset = old_offset;
                     return ScanState::Dismatch;
@@ -293,37 +250,31 @@ namespace _LEXPARSER_CORE
 
     // 一旦匹配成功即触发 Fatal; 没有 OK 状态（不允许出现该 Scanner, 出现即 Fatal）
     // 用于及早断言错误，同样不消耗字符。（比如进入一个无二义性的引导词之后的失配）
-    class FatalIf
-    {
-        typedef FatalIf _Myt;
+    class FatalIf {
     public:
         template <class Scanner>
         explicit FatalIf(Scanner&& scanner, const std::string& err_msg) : m_scanner(std::forward<Scanner>(scanner)), m_err_msg(err_msg) {}
 
-        FatalIf(const _Myt&) = default;
-        FatalIf(_Myt&&) = default;
+        FatalIf(const FatalIf&) = default;
+        FatalIf(FatalIf&&) = default;
 
-        FatalIf& operator=(const _Myt&) = default;
-        FatalIf& operator=(_Myt&&) = default;
+        FatalIf& operator=(const FatalIf&) = default;
+        FatalIf& operator=(FatalIf&&) = default;
 
         explicit FatalIf(const std::string& err_msg = "") : m_err_msg(err_msg) {}
 
         template <class Scanner>
-        _Myt& AddMember(Scanner&& scanner, const std::string& err_msg)
-        {
+        FatalIf& AddMember(Scanner&& scanner, const std::string& err_msg) {
             m_scanner = std::forward<Scanner>(scanner);
             m_err_msg = err_msg;
             return *this;
         }
 
-        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
-        {
-            if (m_scanner)
-            {
+        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept {
+            if (m_scanner) {
                 std::size_t old_offset = offset;
                 ScanState ss = m_scanner(data, len, offset, ctx, err);
-                if (ScanState::OK == ss)
-                {
+                if (ScanState::OK == ss) {
                     err += m_err_msg;
                     offset = old_offset;
                     return ScanState::Fatal;
@@ -339,8 +290,7 @@ namespace _LEXPARSER_CORE
         std::string m_err_msg;
     }; // class FatalIf
 
-    class ActionScanner : public details::DefaultClass
-    {
+    class ActionScanner : public details::DefaultClass {
     public:
         using details::DefaultClass::DefaultClass;
 
@@ -349,10 +299,8 @@ namespace _LEXPARSER_CORE
             : m_scanner(std::forward<Scanner>(scanner)), m_action(std::forward<ActionType>(action))
         {}
 
-        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
-        {
-            if (!m_scanner)
-            { // 纯 Action
+        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept {
+            if (!m_scanner) { // 纯 Action
                 const char* begin = data + offset;
                 ctx.m_lazy_action.emplace_back(ActionMaterial{ StrRef{begin, begin}, ctx.m_scanner_info, this });
                 return ScanState::OK;
@@ -361,23 +309,19 @@ namespace _LEXPARSER_CORE
             std::size_t old_lazy_cnt = ctx.m_lazy_action.size();
             const char* begin = data + offset;
             ScanState ss = m_scanner(data, len, offset, ctx, err);
-            if (ScanState::OK == ss)
-            {
+            if (ScanState::OK == ss) {
                 const char* end = data + offset;
                 ctx.m_lazy_action.emplace_back(ActionMaterial{ StrRef{ begin, end }, ctx.m_scanner_info, this });
             }
-            else if (ScanState::Dismatch == ss)
-            {
+            else if (ScanState::Dismatch == ss) {
                 ctx.m_lazy_action.resize(old_lazy_cnt);
             }
 
             return ss; // 原样抛出
         }
 
-        bool InvokeAction(const ActionMaterial& am, Context& ctx, std::string& err) const noexcept
-        {
-            if (m_action)
-            {
+        bool InvokeAction(const ActionMaterial& am, Context& ctx, std::string& err) const noexcept {
+            if (m_action) {
                 return m_action(am, ctx, err);
             }
             return true; // 兼容 “空 Action”
@@ -388,8 +332,7 @@ namespace _LEXPARSER_CORE
         Action      m_action;
     }; // class ActionScanner
 
-    class PreparedScanner
-    {
+    class PreparedScanner {
     public:
         PreparedScanner() : m_scanner(std::make_shared<ScanFunc>()) {}
 
@@ -399,22 +342,19 @@ namespace _LEXPARSER_CORE
         PreparedScanner& operator=(const PreparedScanner&) = default;
         PreparedScanner& operator=(PreparedScanner&&) = default;
 
-        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
-        {
+        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept {
             assert(m_scanner);
             return (*m_scanner)(data, len, offset, ctx, err);
         }
 
         template <class T, class... Args>
-        void ReshapePlacement(Args&&... args)
-        {
+        void ReshapePlacement(Args&&... args) {
             assert(m_scanner);
             *m_scanner = T(std::forward<Args>(args)...);
         }
 
         template <class T>
-        void Reshape(T&& scanner)
-        {
+        void Reshape(T&& scanner) {
             assert(m_scanner);
             *m_scanner = std::forward<T>(scanner);
         }
@@ -423,30 +363,29 @@ namespace _LEXPARSER_CORE
         std::shared_ptr<ScanFunc>   m_scanner;
     }; // class PreparedScanner
 
-    struct AtMost1 : Loop
-    {
+    struct AtMost1 : Loop {
         AtMost1() = default;
         AtMost1(const AtMost1&) = default;
         AtMost1(AtMost1&&) = default;
-        AtMost1& operator=(const AtMost1&) = default;
-        AtMost1& operator=(AtMost1&&) = default;
         explicit AtMost1(const ScanFunc& member) : Loop(member, 0, 1u) {}
 
-        void AddMember(const ScanFunc& member)
-        {
-            Loop::AddMember(member, 0, 1u);
+        AtMost1& operator=(const AtMost1&) = default;
+        AtMost1& operator=(AtMost1&&) = default;
+        
+        AtMost1& AddMember(const ScanFunc& member) {
+            Loop::AddMember(member, 0, 1u); 
+            return *this;
         }
     }; // struct AtMost1
 
-    namespace  details {
+    namespace details {
         typedef std::pair<char, char> Range;
         using  range_arg_t = void(*)(Range*);
     } // namespace details
 
-    namespace {  void range_v(details::Range*) {} }
+    namespace { void range_v(details::Range*) {} }
 
-    class CharBranch : public details::DefaultClass
-    {
+    class CharBranch : public details::DefaultClass {
     public:
         typedef details::Range Range;
 
@@ -454,54 +393,43 @@ namespace _LEXPARSER_CORE
         using details::DefaultClass::DefaultClass;
 
         explicit CharBranch(std::initializer_list<char> member) : CharBranch(false, member) {}   // set
-        CharBranch(bool negative, std::initializer_list<char> member)                            // set
-        {
+        CharBranch(bool negative, std::initializer_list<char> member) {                          // set
             AddMember(member);
-            if (negative)
-            { // 负字符集
+            if (negative) { // 负字符集
                 m_bitset.flip();
             }
         }
 
         explicit CharBranch(const std::string& member) : CharBranch(false, member) {} // set
 
-        CharBranch(bool negative, const std::string& member)   // set
-        {
+        CharBranch(bool negative, const std::string& member) {  // set
             AddMember(member);
-            if (negative)
-            { // 负字符集
+            if (negative) { // 负字符集
                 m_bitset.flip();
             }
         }
 
-        explicit CharBranch(details::range_arg_t, const std::vector<Range>& ranges)  // range
-        {
-            for (const Range& range : ranges)
-            {
+        explicit CharBranch(details::range_arg_t, const std::vector<Range>& ranges) { // range
+            for (const Range& range : ranges) {
                 AddMember(range_v, range);
             }
         }
 
-        explicit CharBranch(details::range_arg_t, const Range& range)   // range
-        {
+        explicit CharBranch(details::range_arg_t, const Range& range)  { // range
             AddMember(range_v, range);
         }
 
-        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context&, std::string&) const noexcept
-        {
-            if (m_bitset.none())
-            { // 允许空串
+        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context&, std::string&) const noexcept {
+            if (m_bitset.none()) { // 允许空串
                 return ScanState::OK;
             }
 
-            if (offset + 1u > len)
-            { // 至少要求一个字符
+            if (offset + 1u > len) { // 至少要求一个字符
                 return ScanState::Dismatch;
             }
 
             uint8_t c = (uint8_t)(data[offset]);
-            if (m_bitset.test(c))
-            {
+            if (m_bitset.test(c)) {
                 ++offset;
                 // 没有分支 id 可以被回调
                 return ScanState::OK;
@@ -511,27 +439,21 @@ namespace _LEXPARSER_CORE
         }
 
         template <class Member>
-        void AddMember(Member&& member) // set
-        {
-            for (char c : member)
-            {
+        void AddMember(Member&& member) { // set
+            for (char c : member) {
                 uint8_t pos = static_cast<uint8_t>(c);
                 m_bitset.set(pos, true);
             }
         }
 
-        void AddMember(details::range_arg_t, const Range& range) // range
-        {
+        void AddMember(details::range_arg_t, const Range& range) {// range
             assert(range.first <= range.second);
-            if (range.first < range.second)
-            {
-                for (int v = range.first; v < (int)(range.second) + 1; ++v)
-                {
+            if (range.first < range.second) {
+                for (int v = range.first; v < (int)(range.second) + 1; ++v) {
                     AddMember(std::initializer_list<char>{ char(v) });
                 }
             }
-            else if (range.first == range.second)
-            {
+            else if (range.first == range.second) {
                 AddMember(std::initializer_list<char>{range.first});
             }
         }
@@ -540,8 +462,7 @@ namespace _LEXPARSER_CORE
         std::bitset<256u> m_bitset;
     }; // class CharBranch
 
-    class Token
-    {
+    class Token {
     public:
         explicit Token(const std::string& tok) : m_tok(tok) {}
         Token(const Token&) = default;
@@ -549,17 +470,14 @@ namespace _LEXPARSER_CORE
         Token& operator=(const Token&) = default;
         Token& operator=(Token&&) = default;
 
-        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context&, std::string&) const noexcept
-        {
-            if (m_tok.size() + offset > len)
-            {
+        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context&, std::string&) const noexcept {
+            if (m_tok.size() + offset > len) {
                 return ScanState::Dismatch;
             }
 
             //if (!m_tok.empty()) // ??? nop ?
             {
-                if (0 == std::memcmp(m_tok.data(), data + offset, m_tok.size()))
-                {
+                if (0 == std::memcmp(m_tok.data(), data + offset, m_tok.size())) {
                     offset += m_tok.size();
                     return ScanState::OK;
                 }
@@ -575,8 +493,7 @@ namespace _LEXPARSER_CORE
     struct Nop { template <class... Args> ScanState operator()(Args&&...) const noexcept { return ScanState::OK; } };
 
     template <class S, class D>
-    struct _Debugger
-    {
+    struct _Debugger {
         typedef _Debugger<S, D> _Myt;
 
         template <class Sc, class T>
@@ -585,9 +502,7 @@ namespace _LEXPARSER_CORE
         _Debugger(const _Myt&) = default;
         _Debugger() = default;
 
-
-        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept
-        {
+        ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept {
             m_h(); // debug pointer
             return m_scanner(data, len, offset, ctx, err);
         }
@@ -601,8 +516,7 @@ namespace _LEXPARSER_CORE
         template <class Scanner, class Handler,
             class S = typename std::decay<Scanner>::type,
             class H = typename std::decay<Handler>::type>
-            _Debugger<S, H> MakeDebugger(Scanner&& scanner, Handler&& h = []() {})
-        {
+        _Debugger<S, H> MakeDebugger(Scanner&& scanner, Handler&& h = []() {}) {
             return _Debugger<S, H>(std::forward<Scanner>(scanner), std::forward<Handler>(h));
         }
 
@@ -625,63 +539,31 @@ namespace _LEXPARSER_SHELL
         struct AnyCnt {};
         struct AtLeast1 {};
 
-        using any_cnt_t = LoopCntPair(*)(AnyCnt*);
+        using any_cnt_t    = LoopCntPair(*)(AnyCnt*);
         using at_least_1_t = LoopCntPair(*)(AtLeast1*);
-        using at_most_1_t = LoopCntPair(*)(AtMost1*);
+        using at_most_1_t  = LoopCntPair(*)(AtMost1*);
     } // namespace details
 
     namespace //  free function
     {
-        details::LoopCntPair loop_cnt(std::size_t c) noexcept
-        {
+        details::LoopCntPair loop_cnt(std::size_t c) noexcept {
             return details::LoopCntPair{ c, c };
         }
-
-        details::LoopCntPair loop_cnt(std::size_t m, std::size_t n) noexcept
-        {
-            return details::LoopCntPair{ m, n };
+        details::LoopCntPair loop_cnt(std::size_t m, std::size_t n) noexcept { 
+            return details::LoopCntPair{ m, n }; 
         }
-
-        details::LoopCntPair any_cnt(details::AnyCnt* = nullptr)
-        {
-            return details::LoopCntPair{ 0, ~std::size_t(0) };
+        details::LoopCntPair any_cnt(details::AnyCnt* = nullptr) {
+            return details::LoopCntPair{ 0, ~std::size_t(0) }; 
         }
-
-        details::LoopCntPair at_least(std::size_t n) noexcept
-        {
+        details::LoopCntPair at_least(std::size_t n) noexcept {
             return details::LoopCntPair{ n, ~std::size_t(0) };
         }
-
-        details::LoopCntPair at_least_1(details::AtLeast1* = nullptr)
-        {
-            return at_least(1u);
-        }
-
-        details::LoopCntPair at_most(std::size_t n) noexcept
-        {
-            return details::LoopCntPair{ 0, n };
-        }
-
-        details::LoopCntPair at_most_1(details::AtMost1* = nullptr)
-        {
-            return at_most(1u);
-        }
+        details::LoopCntPair at_least_1(details::AtLeast1* = nullptr) { return at_least(1u); }
+        details::LoopCntPair at_most(std::size_t n) noexcept { return details::LoopCntPair{ 0, n }; }
+        details::LoopCntPair at_most_1(details::AtMost1* = nullptr) { return at_most(1u);}
     } // namespace free function
 
-    //// helper type for the visitor #4
-    //template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
-    //// explicit deduction guide (not needed as of C++20)
-    //template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
-    // helper constant for the visitor
-    //template<class> inline constexpr bool always_false_v = false;
-
-    // UnbindPsr, LiteralStringPsr, SequencePsr, BranchPsr, LoopPsr, CharSetPsr, CharRangePsr, ActionPsr
-    // data Parser = UnbindPsr | LiteralStringPsr [char] | SequencePsr [expr] | BranchPsr [expr] | LoopPsr expr m n | CharSetPsr | CharRangePsr | ActionPsr expr ac
-
-    //struct Parser;
-
     struct UnbindPsr {};
-
     using LiteralStringPsr = core::Token;
     using SequencePsr      = core::Seq;
     using BranchPsr        = core::Branch;
@@ -694,17 +576,12 @@ namespace _LEXPARSER_SHELL
     using NopPsr           = core::Nop;
 
     struct Parser;
-    struct LambdaPsr  // @TODO 尚未实现 柯里化
-        : std::function<Parser(const Parser&)>
-    {
+    struct LambdaPsr : std::function<Parser(const Parser&)> {
         using std::function<Parser(const Parser&)>::function;
+        // curry : (Parser -> Parser) -> Parser == Parser -> (Parser -> Parser)
     };
-
-    // (Parser -> Parser) -> Parser == Parser -> (Parser -> Parser)
-
-
-    struct Parser
-    {
+    
+    struct Parser {
         typedef std::variant<
             UnbindPsr, LiteralStringPsr, SequencePsr, BranchPsr, LoopPsr, 
             CharSetPsr, ActionPsr, NotPsr, FatalPsr, Scanner, NopPsr, LambdaPsr
@@ -725,39 +602,32 @@ namespace _LEXPARSER_SHELL
         Parser& operator=(Parser&&) = default;
 
     public:
-        void operator=(const std::string& expr) noexcept
-        {
+        void operator=(const std::string& expr) noexcept {
             assert(std::get_if<UnbindPsr>(&m_psr));
             m_psr = LiteralStringPsr{ expr };
         }
 
         template <std::size_t N>
-        void operator=(const char(&arr)[N]) noexcept
-        {
+        void operator=(const char(&arr)[N]) noexcept {
             return (*this) = std::string(arr);
         }
 
         template <class T, 
-            //class = typename std::enable_if<!std::is_same<UnbindPsr, T>::value>::type>
             class = typename std::enable_if<!std::is_same<UnbindPsr, T>::value>::type,
             class = std::void_t<decltype(std::declval<VariantParser>() = std::declval<T>())>>
-        void operator=(const T& expr) noexcept
-        {
+        void operator=(const T& expr) noexcept {
             m_psr = expr;
         }
 
-        void operator=(const Parser& expr) noexcept
-        {
-            if (this != &expr)
-            {
+        void operator=(const Parser& expr) noexcept {
+            if (this != &expr) {
                 assert(!m_name.empty());
                 m_psr = expr.m_psr;
             }
         }
 
         template <class... Psrs>
-        Parser apply(const Parser& arg, Psrs&&... rest) const
-        {
+        Parser apply(const Parser& arg, Psrs&&... rest) const {
             assert(std::get_if<LambdaPsr>(&m_psr));
             return std::get<LambdaPsr>(m_psr)(arg, std::forward<Psrs>(rest)...);
         }
@@ -771,20 +641,17 @@ namespace _LEXPARSER_SHELL
         }
 
         // CharRangePsr helper function
-        Parser& operator()(char b, char e)
-        {
+        Parser& operator()(char b, char e) {
             return (*this)(std::make_pair(b, e));
         }
 
         // Make LoopPsr
-        Parser operator[](details::LoopCntPair pair) const
-        {
+        Parser operator[](details::LoopCntPair pair) const {
             return Parser(LoopPsr{ *this, pair.first, pair.second });
         }
 
 #if (__cplusplus > 202002) || (defined(_MSC_VER) && (_MSC_VER > 1934))
-        Parser operator[](std::size_t _min, std::size_t _max)  const // C++ 23 
-        {
+        Parser operator[](std::size_t _min, std::size_t _max) const { // C++ 23
             return (*this)[details::LoopCntPair{ _min , _max }];
         }
 #endif
@@ -795,8 +662,7 @@ namespace _LEXPARSER_SHELL
 
         bool Anonymous() const { return m_name.empty(); }
 
-        core::ScanState operator()(const char*, std::size_t, std::size_t&, core::Context&, std::string&) const
-        {
+        core::ScanState operator()(const char*, std::size_t, std::size_t&, core::Context&, std::string&) const {
             return core::ScanState::OK;
         }
 
@@ -805,8 +671,7 @@ namespace _LEXPARSER_SHELL
         std::string    m_name;
     }; // struct Parser
 
-    namespace details
-    {
+    namespace details {
         template <class T, class Parser>
         static inline Parser _MakeSeqOrBranchPair(const Parser& a, const Parser& b) {
             if (a.Anonymous()) {
@@ -821,7 +686,7 @@ namespace _LEXPARSER_SHELL
             return Parser(T { a, b });
         }
 
-        // curry
+        // currying helper
         template <class, class = std::void_t<>>
         struct needs_unapply : std::true_type {};
 
@@ -829,11 +694,11 @@ namespace _LEXPARSER_SHELL
         struct needs_unapply<T, std::void_t<decltype(std::declval<T>()())>> : std::false_type {};
     } // namespace details
 
-    namespace // free function
-    {
+    namespace { // free function
         [[maybe_unused]] Parser operator-(const Parser& a, const Parser& b) {
             return (details::_MakeSeqOrBranchPair<SequencePsr>(a, b)); // _LXP_SEQUENCE_CONCATENATION_CHARACTER
         }
+
         [[maybe_unused]] Parser operator, (const Parser& a, const Parser& b) {
             return (a - b); // 序列连接兼容 ‘-’ 与 ‘,’ 只是它们的优先级不同
         }
@@ -877,8 +742,8 @@ namespace _LEXPARSER_SHELL
             return Parser(FatalPsr(expr, errMsg));
         }
 
-        // nop
-        [[maybe_unused]] Parser nop = Parser(NopPsr());
+        // `nop` variable
+        [[maybe_unused]] const Parser nop = Parser(NopPsr());
 
         [[maybe_unused]] Parser $(const Scanner& scan) {
             return Parser(scan);
@@ -902,5 +767,4 @@ namespace _LEXPARSER_SHELL
     } // namespace  // free function
 
     template <class T> static inline T& _PsrForward(T& v) { return v; }
-
 } // namespace _LEXPARSER_SHELL
