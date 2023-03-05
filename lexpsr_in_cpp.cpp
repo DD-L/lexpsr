@@ -126,16 +126,18 @@ void test_shell1()
             return true;
         };
 
-    psr(root) = (wss, num, wss, "+"_psr, wss, num, wss, "="_psr, wss, num, wss);
+    psr(root) = ( num, "+"_psr, num, "="_psr, num);
 
     std::size_t offset = 0;
     const std::string script = R"(
          23423 + 1032 = 24455
     )";
+
     core::Context ctx;
     std::string err;
-    
-    core::ScanState res = root(script.data(), script.size(), offset, ctx, err);
+    // ctx.SetWhiteCharacters(wss); // BUG
+    ctx.SetWhiteCharacters(wss);
+    core::ScanState res = root.LoadScript(script.data(), script.size(), offset, ctx, err);
     assert(core::ScanState::OK == res);
 
     for (auto&& f : ctx.m_lazy_action)

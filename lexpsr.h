@@ -71,7 +71,17 @@ namespace _LEXPARSER_CORE {
             uint64_t        m_int_temp_in_lazy; // 仅在 lazy action 中使用
         };
 
+        ScanFunc                     m_white_characters;
         std::vector<ActionMaterial>  m_lazy_action;
+
+    public:
+        void SetWhiteCharacters(const ScanFunc& white_characters) {
+            m_white_characters = white_characters;
+        }
+
+        const ScanFunc& IgnoreWhiteCharacters() const {
+            return m_white_characters;
+        }
     }; // struct Context
 
     namespace details {
@@ -590,6 +600,14 @@ namespace _LEXPARSER_SHELL
         > VariantParser;
 
     public:
+        core::ScanState LoadScript(const char* script, std::size_t len, std::size_t& offset, core::Context& ctx, std::string& err) const {
+            if (ctx.IgnoreWhiteCharacters()) {
+                ctx.IgnoreWhiteCharacters()(script, len, offset, ctx, err);
+            }
+            return (*this)(script, len, offset, ctx, err);
+        }
+
+    public:
         explicit Parser(const VariantParser& expr, const std::string& name = std::string())
             : m_psr(expr), m_name(name)
         {}
@@ -662,7 +680,8 @@ namespace _LEXPARSER_SHELL
         Parser operator[](details::any_cnt_t) const { return (*this)[any_cnt()]; }
         Parser operator[](details::at_least_1_t) const { return (*this)[at_least_1()]; }
 
-        bool Anonymous() const { return m_name.empty(); }
+        bool Anonymous() const { return Name().empty(); }
+        const std::string& Name() const { return m_name; }
 
         core::ScanState operator()(const char* script, std::size_t len, std::size_t& offset, core::Context& ctx, std::string& err) const {
             core::ScanState ret = core::ScanState::Fatal;
@@ -679,10 +698,28 @@ namespace _LEXPARSER_SHELL
                     return (ret = core::ScanState::Fatal);
                 }
                 else {
-                    return (ret = _psr(script, len, offset, ctx, err));
+                    ret = _psr(script, len, offset, ctx, err);
+                    if (ctx.IgnoreWhiteCharacters()) {
+                        ctx.IgnoreWhiteCharacters()(script, len, offset, ctx, err);
+                    }
+                    return ret;
                 }
             }, m_psr);
+
             return ret;
+        }
+
+    public:
+        static core::ScanState EatWss(const char* script, std::size_t len, std::size_t& offset, ...) noexcept {
+            while (offset < len) {
+                if (std::isspace((uint8_t)script[offset])) {
+                    ++offset;
+                }
+                else {
+                    break;
+                }
+            }
+            return core::ScanState::OK;
         }
 
     public:
@@ -784,17 +821,7 @@ namespace _LEXPARSER_SHELL
             }
         }
 
-        [[maybe_unused]] const Parser wss(Scanner([](const char* s, std::size_t l, std::size_t& offset, core::Context&, std::string&) {
-            while (offset < l) {
-                if (std::isspace((uint8_t)s[offset])) {
-                    ++offset;
-                }
-                else {
-                    break;
-                }
-            } 
-            return core::ScanState::OK;
-        }), "wss");
+        [[maybe_unused]] const Parser wss(Scanner(Parser::EatWss), "wss");
     } // namespace  // free function
 
     template <class T> static inline T& _PsrForward(T& v) { return v; }
