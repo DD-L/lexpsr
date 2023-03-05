@@ -542,6 +542,8 @@ namespace _LEXPARSER_SHELL
         using any_cnt_t    = LoopCntPair(*)(AnyCnt*);
         using at_least_1_t = LoopCntPair(*)(AtLeast1*);
         using at_most_1_t  = LoopCntPair(*)(AtMost1*);
+
+        //template <class...> struct AlwaysFalse : std::false_type {};
     } // namespace details
 
     namespace //  free function
@@ -572,7 +574,7 @@ namespace _LEXPARSER_SHELL
     using NopPser          = core::Nop;
     using ActionPsr        = core::ActionScanner;
     using NotPsr           = core::LogicNotScanner;
-    using FatalPsr         = core::FatalIf;
+    using FatalIfPsr       = core::FatalIf;
     using NopPsr           = core::Nop;
 
     struct Parser;
@@ -584,7 +586,7 @@ namespace _LEXPARSER_SHELL
     struct Parser {
         typedef std::variant<
             UnbindPsr, LiteralStringPsr, SequencePsr, BranchPsr, LoopPsr, 
-            CharSetPsr, ActionPsr, NotPsr, FatalPsr, Scanner, NopPsr, LambdaPsr
+            CharSetPsr, ActionPsr, NotPsr, FatalIfPsr, Scanner, NopPsr, LambdaPsr
         > VariantParser;
 
     public:
@@ -662,7 +664,23 @@ namespace _LEXPARSER_SHELL
 
         bool Anonymous() const { return m_name.empty(); }
 
-        core::ScanState operator()(const char*, std::size_t, std::size_t&, core::Context&, std::string&) const {
+        core::ScanState operator()(const char* script, std::size_t len, std::size_t& offset, core::Context& ctx, std::string& err) const {
+            std::visit([&](auto&& _psr) -> core::ScanState {
+                typedef typename std::decay<decltype(_psr)>::type P;
+                if constexpr (std::is_same<P, UnbindPsr>::value) {
+                    assert(((void)0, false));
+                    err = "UnbindPsr: ...";
+                    return core::ScanState::Fatal;
+                }
+                else if constexpr (std::is_same<P, LambdaPsr>::value) {
+                    assert(((void)0, false));
+                    err = "LambdaPsr: ...";
+                    return core::ScanState::Fatal;
+                }
+                else {
+                    return _psr(script, len, offset, ctx, err);
+                }
+            }, m_psr);
             return core::ScanState::OK;
         }
 
@@ -672,7 +690,7 @@ namespace _LEXPARSER_SHELL
     }; // struct Parser
 
     namespace details {
-        template <class T, class Parser>
+        template <class T>
         static inline Parser _MakeSeqOrBranchPair(const Parser& a, const Parser& b) {
             if (a.Anonymous()) {
                 // 左结合的连接符，-，会导致 a 有可能也是个 SequenceExpr， 如果 a 是匿名的需展开
@@ -739,7 +757,7 @@ namespace _LEXPARSER_SHELL
         }
 
         [[maybe_unused]] Parser fatal_if(const Parser& expr, const std::string& errMsg = "") {
-            return Parser(FatalPsr(expr, errMsg));
+            return Parser(FatalIfPsr(expr, errMsg));
         }
 
         // `nop` variable
