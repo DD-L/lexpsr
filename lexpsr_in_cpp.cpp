@@ -77,11 +77,6 @@ void test_shell()
 
     psr(abc) = "343434";
 
-    /*
-    fn abc x = x | b;
-    fn(abc)(x)
-    */
-
     auto fn = [&abc](Parser a, Parser b)
     {
         psr(ret) = a | b | abc;
@@ -90,12 +85,16 @@ void test_shell()
 
     psr(fn_app) = fn(m, "sdfs"_psr);                // 函数应用
 
-    psr(id_lambda) = $([](Parser a) { return a; }); // 高阶函数： Parser -> Parser
 
+    psr(id_lambda) = $curry([](Parser a) { return a; }); // 高阶函数： Parser -> Parser
     psr(lambda_apply) = id_lambda.apply("xxxx"_psr);
-    psr(xxxx_psr) = "xxxx";
 
-
+    psr(xxxx0) = $curry([]() {return "wewe"_psr; });
+    psr(xxxx1) = $curry([](Parser a) {return a; });
+    psr(xxxx2) = $curry([](Parser a, Parser b) {return a - b; });
+    psr(xxxx3) = $curry([](Parser a, Parser b, Parser c) {return (a, b) | c; });
+    psr(xxxx4) = $curry([](Parser a, Parser b, Parser c, Parser d) {return d | ((a, b) | c)[{2,2}]; });
+    psr(xxxx4_app) = xxxx4.apply(""_psr).apply("werw"_psr).apply("ewfwe"_psr).apply("wewfwef"_psr);
 }
 
 //void err()

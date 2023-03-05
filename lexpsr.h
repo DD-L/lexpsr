@@ -695,15 +695,19 @@ namespace _LEXPARSER_SHELL
 
     struct Parser;
     struct LambdaPsr  // @TODO 尚未实现 柯里化
-        : std::function<Parser(Parser)>
+        : std::function<Parser(const Parser&)>
     {
-        using std::function<Parser(Parser)>::function;
+        using std::function<Parser(const Parser&)>::function;
     };
+
+    // (Parser -> Parser) -> Parser == Parser -> (Parser -> Parser)
+
 
     struct Parser
     {
         typedef std::variant<
-            UnbindPsr, LiteralStringPsr, SequencePsr, BranchPsr, LoopPsr, CharSetPsr, ActionPsr, NotPsr, FatalPsr, Scanner, NopPsr, LambdaPsr
+            UnbindPsr, LiteralStringPsr, SequencePsr, BranchPsr, LoopPsr, 
+            CharSetPsr, ActionPsr, NotPsr, FatalPsr, Scanner, NopPsr, LambdaPsr
         > VariantParser;
 
     public:
@@ -804,13 +808,11 @@ namespace _LEXPARSER_SHELL
     namespace details
     {
         template <class T, class Parser>
-        static inline Parser _MakeSeqOrBranchPair(const Parser& a, const Parser& b)
-        {
-            if (a.Anonymous())
-            {// 左结合的连接符，-，会导致 a 有可能也是个 SequenceExpr， 如果 a 是匿名的需展开
+        static inline Parser _MakeSeqOrBranchPair(const Parser& a, const Parser& b) {
+            if (a.Anonymous()) {
+                // 左结合的连接符，-，会导致 a 有可能也是个 SequenceExpr， 如果 a 是匿名的需展开
                 const T* _a = std::get_if<T>(&a.m_psr);
-                if (nullptr != _a)
-                {
+                if (nullptr != _a) {
                     T copy = *_a; // copy 一份
                     return Parser(copy.AddMember({ b }));
                 }
@@ -819,79 +821,83 @@ namespace _LEXPARSER_SHELL
             return Parser(T { a, b });
         }
 
+        // curry
+        template <class, class = std::void_t<>>
+        struct needs_unapply : std::true_type {};
+
+        template <class T>
+        struct needs_unapply<T, std::void_t<decltype(std::declval<T>()())>> : std::false_type {};
     } // namespace details
 
     namespace // free function
     {
-        [[maybe_unused]] Parser operator-(const Parser& a, const Parser& b) // _LXP_SEQUENCE_CONCATENATION_CHARACTER
-        {
-            return (details::_MakeSeqOrBranchPair<SequencePsr>(a, b));
+        [[maybe_unused]] Parser operator-(const Parser& a, const Parser& b) {
+            return (details::_MakeSeqOrBranchPair<SequencePsr>(a, b)); // _LXP_SEQUENCE_CONCATENATION_CHARACTER
         }
-        [[maybe_unused]] Parser operator, (const Parser& a, const Parser& b)
-        {
+        [[maybe_unused]] Parser operator, (const Parser& a, const Parser& b) {
             return (a - b); // 序列连接兼容 ‘-’ 与 ‘,’ 只是它们的优先级不同
         }
 
         // | 也是与 , 类似
-        [[maybe_unused]] Parser operator|(const Parser& a, const Parser& b)
-        {
+        [[maybe_unused]] Parser operator|(const Parser& a, const Parser& b) {
             return details::_MakeSeqOrBranchPair<BranchPsr>(a, b);
         }
 
-        [[maybe_unused]] Parser operator<<(const std::string& str, const Action& action)
-        {
+        [[maybe_unused]] Parser operator<<(const std::string& str, const Action& action) {
             return Parser(ActionPsr{ Parser(LiteralStringPsr{str}), action });
         }
 
         template <class T>
-        [[maybe_unused]] Parser operator<<(const T& expr, const Action& action)
-        { // 对与 T 类型的约束，Expr 的构造函数会出手
+        [[maybe_unused]] Parser operator<<(const T& expr, const Action& action) { 
+            // 对与 T 类型的约束，Expr 的构造函数会出手
             return Parser(ActionPsr{ Parser(expr), action });
         }
 
-        [[maybe_unused]] Parser operator"" _psr(const char* str, std::size_t)
-        {
+        [[maybe_unused]] Parser operator"" _psr(const char* str, std::size_t) {
             return Parser(LiteralStringPsr{ str });
         }
 
-        [[maybe_unused]] Parser set(const std::string& s)
-        {
+        [[maybe_unused]] Parser set(const std::string& s) {
             return Parser(CharSetPsr(s));
         }
 
-        [[maybe_unused]] Parser range(char b, char e)
-        {
-            //return Parser(CharRangePsr(b, e));
+        [[maybe_unused]] Parser range(char b, char e) {
             return Parser(CharSetPsr(core::range_v, std::make_pair(b, e)));
         }
 
-        [[maybe_unused]] Parser range(const std::pair<char, char>& pair)
-        {
+        [[maybe_unused]] Parser range(const std::pair<char, char>& pair) {
             return range(pair.first, pair.second);
         }
 
-        [[maybe_unused]] Parser _not(const Parser& expr)
-        { // 函数名添加 _ 前缀是为了避免与 not 操作符冲突
+        [[maybe_unused]] Parser _not(const Parser& expr) { // 函数名添加 _ 前缀是为了避免与 not 操作符冲突
             return Parser(NotPsr(expr));
         }
 
-        [[maybe_unused]] Parser fatal_if(const Parser& expr, const std::string& errMsg = "")
-        {
+        [[maybe_unused]] Parser fatal_if(const Parser& expr, const std::string& errMsg = "") {
             return Parser(FatalPsr(expr, errMsg));
         }
 
         // nop
         [[maybe_unused]] Parser nop = Parser(NopPsr());
 
-        [[maybe_unused]] Parser $(const Scanner& scan)
-        {
-            //return Parser(Scanner(std::forward<scanner_t>(scan)));
+        [[maybe_unused]] Parser $(const Scanner& scan) {
             return Parser(scan);
         }
 
-        [[maybe_unused]] Parser $(const LambdaPsr& lambdaPsr)
-        {
-            return Parser(lambdaPsr);
+        template <class F>
+        [[maybe_unused]] auto $curry(F&& f) {
+            if constexpr (details::needs_unapply<decltype(f)>::value) {
+                return Parser(LambdaPsr([=](auto&& x) {
+                    return $curry(
+                        [=](auto&&...xs) -> decltype(f(x, xs...)) {
+                            return (f(x, xs...));
+                        }
+                    );
+                }));
+            }
+            else {
+                return f();
+            }
         }
     } // namespace  // free function
 
