@@ -130,13 +130,17 @@ void test_shell1()
 
     std::size_t offset = 0;
     const std::string script = R"(
-         23423 + 1032 = 24455
+# commentd
+         23423 + 1032 = 24455 # comment
+# comment
     )";
 
     core::Context ctx;
     std::string err;
-    // ctx.SetWhiteCharacters(wss); // BUG
-    ctx.SetWhiteCharacters(wss);
+    // ctx.SetWhiteSpaces(wss); // BUG
+    psr(comment) = "#"_psr - negative_set("\n")[any_cnt] - "\n"_psr;
+    ctx.SetWhiteSpaces((ws | comment)[any_cnt]);
+    //ctx.SetWhiteSpaces(Parser::EatWss);
     core::ScanState res = root.LoadScript(script.data(), script.size(), offset, ctx, err);
     assert(core::ScanState::OK == res);
 

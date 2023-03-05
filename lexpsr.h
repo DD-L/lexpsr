@@ -25,6 +25,8 @@
 #define psr(var) Parser var(#var); _PsrForward(var)
 #endif // ! psr
 
+namespace _LEXPARSER_SHELL { struct Parser; }
+
 namespace _LEXPARSER_CORE {
     template <class... Args>
     static inline void _Unused(Args&&...) {}
@@ -48,7 +50,7 @@ namespace _LEXPARSER_CORE {
         std::string to_std_string() const { return std::string(data, len); }
     }; // struct StrRef
 
-    struct Context; 
+    class Context; 
     struct ActionMaterial;
     class ActionScanner;
 
@@ -65,24 +67,44 @@ namespace _LEXPARSER_CORE {
         const ActionScanner* m_action_scanner = nullptr;
     };
 
-    struct Context {
+    class Context {
+    public:
         union {
             std::size_t     m_scanner_info = 0;
             uint64_t        m_int_temp_in_lazy; // 仅在 lazy action 中使用
         };
 
-        ScanFunc                     m_white_characters;
         std::vector<ActionMaterial>  m_lazy_action;
 
+    private:
+        friend struct _LEXPARSER_SHELL::Parser;
+        ScanFunc                     m_white_spaces;
+        bool                         m_in_white_spaces = false;
+
     public:
-        void SetWhiteCharacters(const ScanFunc& white_characters) {
-            m_white_characters = white_characters;
+        void SetWhiteSpaces(const ScanFunc& white_spaces) {
+            m_white_spaces = white_spaces;
         }
 
-        const ScanFunc& IgnoreWhiteCharacters() const {
-            return m_white_characters;
+    private:
+        const ScanFunc& IgnoreWhiteSpaces() const {
+            return m_white_spaces;
         }
-    }; // struct Context
+
+        bool InWhiteSpacesPsr() const {
+            return m_in_white_spaces;
+        }
+
+        struct WhiteSpacesGuard {
+            bool& m_white_spaces_guard;
+            explicit WhiteSpacesGuard(bool& guard) : m_white_spaces_guard(guard) { m_white_spaces_guard = true; }
+            ~WhiteSpacesGuard() { m_white_spaces_guard = false; }
+        };
+
+        WhiteSpacesGuard WhiteSpacesAutoLock() {
+            return WhiteSpacesGuard(m_in_white_spaces);
+        }
+    }; // class Context
 
     namespace details {
         struct DefaultClass {
@@ -592,17 +614,23 @@ namespace _LEXPARSER_SHELL
         using std::function<Parser(const Parser&)>::function;
         // curry : (Parser -> Parser) -> Parser == Parser -> (Parser -> Parser)
     };
+
+    //namespace details {
+    //    template <class T> struct WhiteCharactersSensitivePsr : std::false_type {};
+    //    // 终结符 Parser 中除 Scanner 外，LiteralStringPsr 和 CharSetPsr 都需要考虑白字符的处理 !!!
+    //    template <> struct WhiteCharactersSensitivePsr<LiteralStringPsr> : std::true_type {};
+    //    template <> struct WhiteCharactersSensitivePsr<CharSetPsr> : std::true_type {};
+    //} // namespace details
     
     struct Parser {
         typedef std::variant<
-            UnbindPsr, LiteralStringPsr, SequencePsr, BranchPsr, LoopPsr, 
-            CharSetPsr, ActionPsr, NotPsr, FatalIfPsr, Scanner, NopPsr, LambdaPsr
+            UnbindPsr, LiteralStringPsr, CharSetPsr, SequencePsr, BranchPsr, LoopPsr, ActionPsr, NotPsr, FatalIfPsr, Scanner, NopPsr, LambdaPsr
         > VariantParser;
 
     public:
         core::ScanState LoadScript(const char* script, std::size_t len, std::size_t& offset, core::Context& ctx, std::string& err) const {
-            if (ctx.IgnoreWhiteCharacters()) {
-                ctx.IgnoreWhiteCharacters()(script, len, offset, ctx, err);
+            if (ctx.IgnoreWhiteSpaces()) {
+                ctx.IgnoreWhiteSpaces()(script, len, offset, ctx, err);
             }
             return (*this)(script, len, offset, ctx, err);
         }
@@ -699,9 +727,10 @@ namespace _LEXPARSER_SHELL
                 }
                 else {
                     ret = _psr(script, len, offset, ctx, err);
-                    if (ctx.IgnoreWhiteCharacters()) {
-                        ctx.IgnoreWhiteCharacters()(script, len, offset, ctx, err);
-                    }
+                    //if ((!ctx.InWhiteSpacesPsr()) && ctx.IgnoreWhiteSpaces()) {
+                    //    auto guard = ctx.WhiteSpacesAutoLock(); (void)guard;
+                    //    ctx.IgnoreWhiteSpaces()(script, len, offset, ctx, err);
+                    //}
                     return ret;
                 }
             }, m_psr);
@@ -710,12 +739,19 @@ namespace _LEXPARSER_SHELL
         }
 
     public:
+        // 吃掉一个白字符
+        static core::ScanState EatWs(const char* script, std::size_t len, std::size_t& offset, ...) noexcept {
+            if (offset < len && (std::isspace((uint8_t)script[offset]))) {
+                ++offset;
+                return core::ScanState::OK;
+            }
+            return core::ScanState::Dismatch;
+        }
+
+        // 吃掉一批连续的白字符，总是成功
         static core::ScanState EatWss(const char* script, std::size_t len, std::size_t& offset, ...) noexcept {
             while (offset < len) {
-                if (std::isspace((uint8_t)script[offset])) {
-                    ++offset;
-                }
-                else {
+                if (core::ScanState::OK != EatWs(script, len, offset)) {
                     break;
                 }
             }
@@ -778,8 +814,14 @@ namespace _LEXPARSER_SHELL
             return Parser(LiteralStringPsr{ str });
         }
 
+        // 字符集
         [[maybe_unused]] Parser set(const std::string& s) {
             return Parser(CharSetPsr(s));
+        }
+        
+        // 负字符集
+        [[maybe_unused]] Parser negative_set(const std::string& s) {
+            return Parser(CharSetPsr(true, s));
         }
 
         [[maybe_unused]] Parser range(char b, char e) {
@@ -821,7 +863,9 @@ namespace _LEXPARSER_SHELL
             }
         }
 
-        [[maybe_unused]] const Parser wss(Scanner(Parser::EatWss), "wss");
+        [[maybe_unused]] const Parser ws(Scanner(Parser::EatWs), "ws");     // 吃掉一个白字符
+        [[maybe_unused]] const Parser wss(Scanner(Parser::EatWss), "wss");  // 吃掉一批连续的白字符
+
     } // namespace  // free function
 
     template <class T> static inline T& _PsrForward(T& v) { return v; }
