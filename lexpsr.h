@@ -665,23 +665,24 @@ namespace _LEXPARSER_SHELL
         bool Anonymous() const { return m_name.empty(); }
 
         core::ScanState operator()(const char* script, std::size_t len, std::size_t& offset, core::Context& ctx, std::string& err) const {
+            core::ScanState ret = core::ScanState::Fatal;
             std::visit([&](auto&& _psr) -> core::ScanState {
                 typedef typename std::decay<decltype(_psr)>::type P;
                 if constexpr (std::is_same<P, UnbindPsr>::value) {
                     assert(((void)0, false));
                     err = "UnbindPsr: ...";
-                    return core::ScanState::Fatal;
+                    return (ret = core::ScanState::Fatal);
                 }
                 else if constexpr (std::is_same<P, LambdaPsr>::value) {
                     assert(((void)0, false));
                     err = "LambdaPsr: ...";
-                    return core::ScanState::Fatal;
+                    return (ret = core::ScanState::Fatal);
                 }
                 else {
-                    return _psr(script, len, offset, ctx, err);
+                    return (ret = _psr(script, len, offset, ctx, err));
                 }
             }, m_psr);
-            return core::ScanState::OK;
+            return ret;
         }
 
     public:
@@ -731,7 +732,7 @@ namespace _LEXPARSER_SHELL
         }
 
         template <class T>
-        [[maybe_unused]] Parser operator<<(const T& expr, const Action& action) { 
+        [[maybe_unused]] Parser operator<<=(const T& expr, const Action& action) { 
             // 对与 T 类型的约束，Expr 的构造函数会出手
             return Parser(ActionPsr{ Parser(expr), action });
         }
@@ -782,6 +783,18 @@ namespace _LEXPARSER_SHELL
                 return f();
             }
         }
+
+        [[maybe_unused]] const Parser wss(Scanner([](const char* s, std::size_t l, std::size_t& offset, core::Context&, std::string&) {
+            while (offset < l) {
+                if (std::isspace((uint8_t)s[offset])) {
+                    ++offset;
+                }
+                else {
+                    break;
+                }
+            } 
+            return core::ScanState::OK;
+        }), "wss");
     } // namespace  // free function
 
     template <class T> static inline T& _PsrForward(T& v) { return v; }

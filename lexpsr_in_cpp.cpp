@@ -44,7 +44,7 @@ int test_core()
     return 0;
 }
 
-void test_shell()
+void test_shell0()
 {
     using namespace lexpsr_shell;
 
@@ -65,7 +65,7 @@ void test_shell()
 
 
     h = f[{ 2, 4 }];
-    i = set("qazwsxwdc") << [](const core::ActionMaterial&, core::Context&, std::string&) -> bool { return true; };
+    i = set("qazwsxwdc") <<= [](const core::ActionMaterial&, core::Context&, std::string&) -> bool { return true; };
     j = range('0', '9')('a', 'z')('A', 'Z')[{2, 2}];
 
     k = _not(h) | a;           // 逻辑非
@@ -103,14 +103,61 @@ void test_shell()
 //
 //    psr(a); psr(b); psr(c);
 //    auto ac = [](const core::ActionMaterial&, core::Context&, std::string&) { return true; };
-//    a = "abc" << ac << ac;
+//    a = "abc" <<= ac <<= ac;
 //}
 
 #include <iostream>
 
+void test_shell1()
+{
+    using namespace lexpsr_shell;
+    // 1 + 1 = 2
+    // root : num '+' num '=' num ;
+    // num  : /[1-9][0-9]*|0/
+    // [1-9] : CharSet("123456789")
+    // [0-9] : CharSet("0123456789")
+
+    // [1-9][0-9]*
+    psr(num) = (range('1', '9') - range('0', '9')[any_cnt]) | "0"_psr
+        <<= 
+        [](const core::ActionMaterial& am, core::Context&, std::string&) 
+        {
+            std::cout << am.m_token.to_std_string() << std::endl;
+            return true;
+        };
+
+    psr(root) = (wss, num, wss, "+"_psr, wss, num, wss, "="_psr, wss, num, wss);
+
+    std::size_t offset = 0;
+    const std::string script = R"(
+         23423 + 1032 = 24455
+    )";
+    core::Context ctx;
+    std::string err;
+    
+    core::ScanState res = root(script.data(), script.size(), offset, ctx, err);
+    assert(core::ScanState::OK == res);
+
+    for (auto&& f : ctx.m_lazy_action)
+    {
+        if (! f.m_action_scanner->InvokeAction(f, ctx, err))
+        {
+            std::cerr << "Error." << std::endl;
+            return;
+        }
+    }
+}
+
+void test_xml()
+{
+}
+
+
+
 int main()
 {
     test_core();
-    test_shell();
+    test_shell0();
+    test_shell1();
     return 0;
 }
