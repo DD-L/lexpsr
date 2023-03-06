@@ -25,6 +25,10 @@
 #define psr(var) Parser var(#var); _PsrForward(var)
 #endif // ! psr
 
+#ifndef decl_psr
+#define decl_psr(var) Parser var(std::make_shared<Parser>(UnbindPsr()), #var); _PsrForward(var)
+#endif // ! decl_psr
+
 namespace _LEXPARSER_SHELL { struct Parser; }
 
 namespace _LEXPARSER_CORE {
@@ -50,7 +54,7 @@ namespace _LEXPARSER_CORE {
         std::string to_std_string() const { return std::string(data, len); }
     }; // struct StrRef
 
-    class Context; 
+    class Context;
     struct ActionMaterial;
     class ActionScanner;
 
@@ -60,6 +64,20 @@ namespace _LEXPARSER_CORE {
 
     typedef std::function<ScanState(const char*, std::size_t, std::size_t&, Context&, std::string&)> ScanFunc;
     typedef std::function<bool(const ActionMaterial&, Context& ctx, std::string& err)>               Action; // 识别动作
+
+    struct ScanArgs {
+        const char*  m_script = nullptr;
+        std::size_t  m_length = 0;
+        std::size_t& m_offset;
+        Context&     m_contex;
+        std::string& m_error_message;
+    };
+
+    struct ActionArgs {
+        const ActionMaterial& m_action_material;
+        Context&              m_contex;
+        std::string&          m_error_message;
+    };
 
     struct ActionMaterial {
         const StrRef         m_token;
@@ -82,8 +100,25 @@ namespace _LEXPARSER_CORE {
         bool                         m_in_white_spaces = false;
 
     public:
-        void SetWhiteSpaces(const ScanFunc& white_spaces) {
+        Context& Reset() {
+            ResetLazyAction();
+            ClearWhiteSpaces();
+            return *this;
+        }
+
+        Context& SetWhiteSpaces(const ScanFunc& white_spaces) {
             m_white_spaces = white_spaces;
+            return *this;
+        }
+
+        Context& ClearWhiteSpaces() {
+            SetWhiteSpaces(nullptr);
+            return *this;
+        }
+
+        Context& ResetLazyAction() {
+            m_lazy_action.clear();
+            return *this;
         }
 
     private:
@@ -101,7 +136,7 @@ namespace _LEXPARSER_CORE {
             ~WhiteSpacesGuard() { m_white_spaces_guard = false; }
         };
 
-        WhiteSpacesGuard WhiteSpacesAutoLock() {
+        WhiteSpacesGuard WhiteSpacesScopeGuard() {
             return WhiteSpacesGuard(m_in_white_spaces);
         }
     }; // class Context
@@ -193,7 +228,7 @@ namespace _LEXPARSER_CORE {
         using details::DefaultClass::DefaultClass;
 
         template <class Scanner>
-        Loop(Scanner&& member, std::size_t min, std::size_t max) 
+        Loop(Scanner&& member, std::size_t min, std::size_t max)
             : m_min(min), m_max(max), m_member(std::forward<Scanner>(member)) {
             assert(m_min <= m_max);
         }
@@ -246,9 +281,9 @@ namespace _LEXPARSER_CORE {
     public:
         using details::DefaultClass::DefaultClass;
 
-        template <class Scanner, class D = typename std::decay<Scanner>::type, 
+        template <class Scanner, class D = typename std::decay<Scanner>::type,
             class = typename std::enable_if<!std::is_same<D, LogicNotScanner>::value>::type>
-        explicit LogicNotScanner(Scanner&& scanner) : m_scanner(std::forward<Scanner>(scanner)) {}
+            explicit LogicNotScanner(Scanner&& scanner) : m_scanner(std::forward<Scanner>(scanner)) {}
 
         template <class Scanner>
         void AddMember(Scanner&& scanner) {
@@ -391,6 +426,9 @@ namespace _LEXPARSER_CORE {
             *m_scanner = std::forward<T>(scanner);
         }
 
+        ScanFunc& Target() { assert(m_scanner); return *m_scanner; }
+        const ScanFunc& Target() const { return const_cast<PreparedScanner*>(this)->Target(); }
+
     private:
         std::shared_ptr<ScanFunc>   m_scanner;
     }; // class PreparedScanner
@@ -403,9 +441,9 @@ namespace _LEXPARSER_CORE {
 
         AtMost1& operator=(const AtMost1&) = default;
         AtMost1& operator=(AtMost1&&) = default;
-        
+
         AtMost1& AddMember(const ScanFunc& member) {
-            Loop::AddMember(member, 0, 1u); 
+            Loop::AddMember(member, 0, 1u);
             return *this;
         }
     }; // struct AtMost1
@@ -419,7 +457,7 @@ namespace _LEXPARSER_CORE {
 
     class CharBranch : public details::DefaultClass {
     public:
-        typedef details::Range Range;
+        typedef details::Range Range; // [a, b] 左闭右闭区间
 
     public:
         using details::DefaultClass::DefaultClass;
@@ -447,8 +485,18 @@ namespace _LEXPARSER_CORE {
             }
         }
 
-        explicit CharBranch(details::range_arg_t, const Range& range)  { // range
+        explicit CharBranch(details::range_arg_t, const Range& range) { // range
             AddMember(range_v, range);
+        }
+
+        explicit CharBranch(details::range_arg_t, bool negative, const Range& range) { // negative_range
+            assert(range.first <= range.second);
+            if (0 < range.first) {
+                AddMember(range_v, Range(0, range.first - 1));
+            }
+            if (range.second < (~static_cast<char>(0))) {
+                AddMember(range_v, Range(range.second + 1, (~static_cast<char>(0))));
+            }
         }
 
         ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context&, std::string&) const noexcept {
@@ -561,40 +609,41 @@ namespace _LEXPARSER_SHELL
 {
     namespace core = _LEXPARSER_CORE;
 
-    typedef core::ScanFunc  Scanner;
-    typedef core::Action    Action;
+    typedef core::ScanFunc   Scanner;
+    typedef core::ScanArgs   ScanArgs;
 
-    namespace details
-    {
+    typedef core::Action     Action;
+    typedef core::ActionArgs ActionArgs;
+
+    typedef core::ScanState  ScanState;
+
+    namespace details {
         typedef std::pair<std::size_t, std::size_t> LoopCntPair;
         struct AtMost1 {};
         struct AnyCnt {};
         struct AtLeast1 {};
 
-        using any_cnt_t    = LoopCntPair(*)(AnyCnt*);
+        using any_cnt_t = LoopCntPair(*)(AnyCnt*);
         using at_least_1_t = LoopCntPair(*)(AtLeast1*);
-        using at_most_1_t  = LoopCntPair(*)(AtMost1*);
-
-        //template <class...> struct AlwaysFalse : std::false_type {};
+        using at_most_1_t = LoopCntPair(*)(AtMost1*);
     } // namespace details
 
-    namespace //  free function
-    {
+    namespace { //  free function
         details::LoopCntPair loop_cnt(std::size_t c) noexcept {
             return details::LoopCntPair{ c, c };
         }
-        details::LoopCntPair loop_cnt(std::size_t m, std::size_t n) noexcept { 
-            return details::LoopCntPair{ m, n }; 
+        details::LoopCntPair loop_cnt(std::size_t m, std::size_t n) noexcept {
+            return details::LoopCntPair{ m, n };
         }
         details::LoopCntPair any_cnt(details::AnyCnt* = nullptr) {
-            return details::LoopCntPair{ 0, ~std::size_t(0) }; 
+            return details::LoopCntPair{ 0, ~std::size_t(0) };
         }
         details::LoopCntPair at_least(std::size_t n) noexcept {
             return details::LoopCntPair{ n, ~std::size_t(0) };
         }
         details::LoopCntPair at_least_1(details::AtLeast1* = nullptr) { return at_least(1u); }
         details::LoopCntPair at_most(std::size_t n) noexcept { return details::LoopCntPair{ 0, n }; }
-        details::LoopCntPair at_most_1(details::AtMost1* = nullptr) { return at_most(1u);}
+        details::LoopCntPair at_most_1(details::AtMost1* = nullptr) { return at_most(1u); }
     } // namespace free function
 
     struct UnbindPsr {};
@@ -603,7 +652,6 @@ namespace _LEXPARSER_SHELL
     using BranchPsr        = core::Branch;
     using LoopPsr          = core::Loop;
     using CharSetPsr       = core::CharBranch;
-    using NopPser          = core::Nop;
     using ActionPsr        = core::ActionScanner;
     using NotPsr           = core::LogicNotScanner;
     using FatalIfPsr       = core::FatalIf;
@@ -612,27 +660,25 @@ namespace _LEXPARSER_SHELL
     struct Parser;
     struct LambdaPsr : std::function<Parser(const Parser&)> {
         using std::function<Parser(const Parser&)>::function;
-        // curry : (Parser -> Parser) -> Parser == Parser -> (Parser -> Parser)
+        // currying. for example, (Parser -> Parser) -> Parser == Parser -> (Parser -> Parser).
     };
 
-    //namespace details {
-    //    template <class T> struct WhiteCharactersSensitivePsr : std::false_type {};
-    //    // 终结符 Parser 中除 Scanner 外，LiteralStringPsr 和 CharSetPsr 都需要考虑白字符的处理 !!!
-    //    template <> struct WhiteCharactersSensitivePsr<LiteralStringPsr> : std::true_type {};
-    //    template <> struct WhiteCharactersSensitivePsr<CharSetPsr> : std::true_type {};
-    //} // namespace details
-    
+    struct IntPsr {}; // 表示数字的 psr , 兼容丘奇数与立即数 @TODO
+    using PreDeclPsr = std::shared_ptr<Parser>;
+
     struct Parser {
         typedef std::variant<
-            UnbindPsr, LiteralStringPsr, CharSetPsr, SequencePsr, BranchPsr, LoopPsr, ActionPsr, NotPsr, FatalIfPsr, Scanner, NopPsr, LambdaPsr
+            UnbindPsr, LiteralStringPsr, CharSetPsr, SequencePsr, BranchPsr, LoopPsr, ActionPsr, NotPsr, FatalIfPsr, Scanner, NopPsr, LambdaPsr,
+            PreDeclPsr
         > VariantParser;
 
     public:
-        core::ScanState LoadScript(const char* script, std::size_t len, std::size_t& offset, core::Context& ctx, std::string& err) const {
+        ScanState ScanScript(const char* script, std::size_t len, std::size_t& offset, core::Context& ctx, std::string& err) const {
+            ScanState ret = (*this)(script, len, offset, ctx, err);
             if (ctx.IgnoreWhiteSpaces()) {
                 ctx.IgnoreWhiteSpaces()(script, len, offset, ctx, err);
             }
-            return (*this)(script, len, offset, ctx, err);
+            return ret;
         }
 
     public:
@@ -646,31 +692,41 @@ namespace _LEXPARSER_SHELL
 
         Parser(const Parser&) = default;
         Parser(Parser&&) = default;
-        //Parser& operator=(const Parser&) = default;
-        Parser& operator=(Parser&&) = default;
 
     public:
         void operator=(const std::string& expr) noexcept {
-            assert(std::get_if<UnbindPsr>(&m_psr));
-            m_psr = LiteralStringPsr{ expr };
+            Unwrap() = LiteralStringPsr{ expr };
         }
 
         template <std::size_t N>
         void operator=(const char(&arr)[N]) noexcept {
-            return (*this) = std::string(arr);
+            Unwrap() = std::string(arr);
         }
 
-        template <class T, 
+        template <class T,
             class = typename std::enable_if<!std::is_same<UnbindPsr, T>::value>::type,
             class = std::void_t<decltype(std::declval<VariantParser>() = std::declval<T>())>>
-        void operator=(const T& expr) noexcept {
-            m_psr = expr;
+            void operator=(const T& expr) noexcept {
+            //Unwrap() = expr; // 会有警告，所以写成下面这种
+            if (std::get_if<PreDeclPsr>(&m_psr)) {
+                (*std::get<PreDeclPsr>(m_psr)) = expr;
+            }
+            else {
+                m_psr = expr;
+            }
         }
 
         void operator=(const Parser& expr) noexcept {
             if (this != &expr) {
                 assert(!m_name.empty());
-                m_psr = expr.m_psr;
+                Unwrap() = expr.m_psr;
+            }
+        }
+
+        void operator=(Parser&& expr) noexcept {
+            if (this != &expr) {
+                assert(!m_name.empty());
+                Unwrap() = std::move(expr.m_psr);
             }
         }
 
@@ -679,6 +735,8 @@ namespace _LEXPARSER_SHELL
             assert(std::get_if<LambdaPsr>(&m_psr));
             return std::get<LambdaPsr>(m_psr)(arg, std::forward<Psrs>(rest)...);
         }
+
+        const Parser& apply() const { return *this; } // for 完备性
 
         // CharRangePsr helper function
         Parser& operator()(const std::pair<char, char>& range)
@@ -710,52 +768,68 @@ namespace _LEXPARSER_SHELL
 
         bool Anonymous() const { return Name().empty(); }
         const std::string& Name() const { return m_name; }
+        Parser& SetName(const std::string& name) { m_name = name; return *this; }
 
-        core::ScanState operator()(const char* script, std::size_t len, std::size_t& offset, core::Context& ctx, std::string& err) const {
-            core::ScanState ret = core::ScanState::Fatal;
-            std::visit([&](auto&& _psr) -> core::ScanState {
+        ScanState operator()(const char* script, std::size_t len, std::size_t& offset, core::Context& ctx, std::string& err) const {
+            ScanState ret = ScanState::Fatal;
+            std::visit([&](auto&& _psr) -> ScanState {
                 typedef typename std::decay<decltype(_psr)>::type P;
                 if constexpr (std::is_same<P, UnbindPsr>::value) {
                     assert(((void)0, false));
                     err = "UnbindPsr: ...";
-                    return (ret = core::ScanState::Fatal);
+                    return (ret = ScanState::Fatal);
                 }
                 else if constexpr (std::is_same<P, LambdaPsr>::value) {
                     assert(((void)0, false));
                     err = "LambdaPsr: ...";
-                    return (ret = core::ScanState::Fatal);
+                    return (ret = ScanState::Fatal);
+                }
+                else if constexpr (std::is_same<P, PreDeclPsr>::value) {
+                    assert(nullptr != _psr);
+                    return (ret = (*_psr)(script, len, offset, ctx, err));
                 }
                 else {
-                    ret = _psr(script, len, offset, ctx, err);
-                    //if ((!ctx.InWhiteSpacesPsr()) && ctx.IgnoreWhiteSpaces()) {
-                    //    auto guard = ctx.WhiteSpacesAutoLock(); (void)guard;
-                    //    ctx.IgnoreWhiteSpaces()(script, len, offset, ctx, err);
-                    //}
-                    return ret;
+                    if (ctx.IgnoreWhiteSpaces() && (!ctx.InWhiteSpacesPsr())) {
+                        auto guard = ctx.WhiteSpacesScopeGuard(); (void)guard; // 白字符不能递归下去
+                        ctx.IgnoreWhiteSpaces()(script, len, offset, ctx, err);
+                    }
+                    return (ret = _psr(script, len, offset, ctx, err));
+
                 }
             }, m_psr);
 
             return ret;
         }
 
+        Parser& Unwrap() {
+            if (std::get_if<PreDeclPsr>(&m_psr)) {
+                auto&& inner = std::get<PreDeclPsr>(m_psr);
+                assert(nullptr != inner);
+                return *inner;
+            }
+            return *this;
+        }
+
+        const Parser& Unwrap() const { return const_cast<Parser*>(this)->Unwrap(); };
+
     public:
         // 吃掉一个白字符
-        static core::ScanState EatWs(const char* script, std::size_t len, std::size_t& offset, ...) noexcept {
+        static ScanState EatWs(const char* script, std::size_t len, std::size_t& offset, ...) noexcept {
             if (offset < len && (std::isspace((uint8_t)script[offset]))) {
                 ++offset;
-                return core::ScanState::OK;
+                return ScanState::OK;
             }
-            return core::ScanState::Dismatch;
+            return ScanState::Dismatch;
         }
 
         // 吃掉一批连续的白字符，总是成功
-        static core::ScanState EatWss(const char* script, std::size_t len, std::size_t& offset, ...) noexcept {
+        static ScanState EatWss(const char* script, std::size_t len, std::size_t& offset, ...) noexcept {
             while (offset < len) {
-                if (core::ScanState::OK != EatWs(script, len, offset)) {
+                if (ScanState::OK != EatWs(script, len, offset)) {
                     break;
                 }
             }
-            return core::ScanState::OK;
+            return ScanState::OK;
         }
 
     public:
@@ -775,7 +849,7 @@ namespace _LEXPARSER_SHELL
                 }
             }
 
-            return Parser(T { a, b });
+            return Parser(T{ a, b });
         }
 
         // currying helper
@@ -784,6 +858,8 @@ namespace _LEXPARSER_SHELL
 
         template <class T>
         struct needs_unapply<T, std::void_t<decltype(std::declval<T>()())>> : std::false_type {};
+
+        typedef std::function<bool(const ActionArgs&)> action_wrap_t;
     } // namespace details
 
     namespace { // free function
@@ -800,14 +876,33 @@ namespace _LEXPARSER_SHELL
             return details::_MakeSeqOrBranchPair<BranchPsr>(a, b);
         }
 
-        [[maybe_unused]] Parser operator<<(const std::string& str, const Action& action) {
+        // <<= 与 = 优先级相同，但是他们都是右结合
+        [[maybe_unused]] Parser operator<<=(const std::string& str, const Action& action) {
             return Parser(ActionPsr{ Parser(LiteralStringPsr{str}), action });
         }
 
         template <class T>
-        [[maybe_unused]] Parser operator<<=(const T& expr, const Action& action) { 
+        [[maybe_unused]] Parser operator<<=(const T& expr, const Action& action) {
             // 对与 T 类型的约束，Expr 的构造函数会出手
             return Parser(ActionPsr{ Parser(expr), action });
+        }
+
+        [[maybe_unused]] Parser& operator<<=(Parser& expr, const Action& action) {
+            expr = Parser(ActionPsr{ expr.Unwrap(), action });
+            return expr;
+        }
+
+        template <class T>
+        [[maybe_unused]] Parser operator<<=(const T& expr, const details::action_wrap_t& action) {
+            return expr <<= [action](const core::ActionMaterial& a, core::Context& c, std::string& e) -> bool {
+                return action(ActionArgs{ a, c, e });
+            };
+        }
+
+        [[maybe_unused]] Parser& operator<<=(Parser& expr, const details::action_wrap_t& action) {
+            return expr <<= [action](const core::ActionMaterial& a, core::Context& c, std::string& e) -> bool {
+                return action(ActionArgs{ a, c, e });
+            };
         }
 
         [[maybe_unused]] Parser operator"" _psr(const char* str, std::size_t) {
@@ -818,7 +913,7 @@ namespace _LEXPARSER_SHELL
         [[maybe_unused]] Parser set(const std::string& s) {
             return Parser(CharSetPsr(s));
         }
-        
+
         // 负字符集
         [[maybe_unused]] Parser negative_set(const std::string& s) {
             return Parser(CharSetPsr(true, s));
@@ -832,6 +927,14 @@ namespace _LEXPARSER_SHELL
             return range(pair.first, pair.second);
         }
 
+        [[maybe_unused]] Parser negative_range(char b, char e) {
+            return Parser(CharSetPsr(core::range_v, true, std::make_pair(b, e)));
+        }
+
+        [[maybe_unused]] Parser negative_range(const std::pair<char, char>& pair) {
+            return negative_range(pair.first, pair.second);
+        }
+
         [[maybe_unused]] Parser _not(const Parser& expr) { // 函数名添加 _ 前缀是为了避免与 not 操作符冲突
             return Parser(NotPsr(expr));
         }
@@ -840,11 +943,14 @@ namespace _LEXPARSER_SHELL
             return Parser(FatalIfPsr(expr, errMsg));
         }
 
-        // `nop` variable
-        [[maybe_unused]] const Parser nop = Parser(NopPsr());
-
         [[maybe_unused]] Parser $(const Scanner& scan) {
             return Parser(scan);
+        }
+
+        [[maybe_unused]] Parser $(const std::function<ScanState(const ScanArgs&)>& scan) {
+            return $([scan](const char* s, std::size_t l, std::size_t& o, core::Context& c, std::string& e) -> ScanState {
+                return scan(ScanArgs{ s, l, o, c, e });
+            });
         }
 
         template <class F>
@@ -863,9 +969,23 @@ namespace _LEXPARSER_SHELL
             }
         }
 
-        [[maybe_unused]] const Parser ws(Scanner(Parser::EatWs), "ws");     // 吃掉一个白字符
-        [[maybe_unused]] const Parser wss(Scanner(Parser::EatWss), "wss");  // 吃掉一批连续的白字符
+        [[maybe_unused]] const Parser nop = Parser(NopPsr(), "nop");      // `nop` variable，永远成功
+        [[maybe_unused]] const Parser _false = _not(nop).SetName("_false");  // `_false` variable，永远失配
+        [[maybe_unused]] const Parser ws(Scanner(Parser::EatWs), "ws");      // ws  吃掉一个白字符，失败返回失配
+        [[maybe_unused]] const Parser wss(Scanner(Parser::EatWss), "wss");   // wss 吃掉一批连续的白字符，永远成功
 
+        //////////////////
+        std::pair<bool, std::size_t> InvokeActions(core::Context& ctx, std::string& err) {
+            std::size_t success_cnt = 0;
+            const std::size_t sz = ctx.m_lazy_action.size();
+            for (; success_cnt < sz; ++success_cnt) {
+                auto&& f = ctx.m_lazy_action[success_cnt];
+                if (!f.m_action_scanner->InvokeAction(f, ctx, err)) {
+                    break;
+                }
+            }
+            return std::make_pair(sz == success_cnt, success_cnt);
+        }
     } // namespace  // free function
 
     template <class T> static inline T& _PsrForward(T& v) { return v; }

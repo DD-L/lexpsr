@@ -57,22 +57,20 @@ void test_shell0()
     psr(m); psr(n); psr(o);
 
     psr(a) = "abc";
-    b = "bbb" << [](const core::ActionMaterial&, core::Context&, std::string&) -> bool { return true; };
+    b = "bbb" <<= [](const ActionArgs&) -> bool { return true; };
     c = "ccc";
     d = "eeee";
     f = "ffff";
-    g = (a - b - c | d  - "xxxde"_psr | f)[{2, 3}];  // - 的优先级要比 | 高
+    g = (a - b - c | d - "xxxde"_psr | f)[{2, 3}];  // - 的优先级要比 | 高
 
 
     h = f[{ 2, 4 }];
-    i = set("qazwsxwdc") <<= [](const core::ActionMaterial&, core::Context&, std::string&) -> bool { return true; };
+    i = set("qazwsxwdc") <<= [](const ActionArgs&) -> bool { return true; };
     j = range('0', '9')('a', 'z')('A', 'Z')[{2, 2}];
 
     k = _not(h) | a;           // 逻辑非
     l = fatal_if(j, "errMsg"); // 致命错误
-    m = $([](const char*, std::size_t, std::size_t&, core::Context&, std::string&) {
-        return core::ScanState::OK;
-    })[{2, 4}];    // 自由函数
+    m = $([](const ScanArgs&) {  return ScanState::OK; })[{2, 4}];    // 自由函数
     n = "xxx"_psr[any_cnt] | "xxxx"_psr[loop_cnt(3)] | "xx"_psr[at_least_1] | "eee"_psr[at_least(5)] | "sddd"_psr[at_most_1] | "ewrwe"_psr[at_most(5u)] | c[loop_cnt(3, 6)][{2, 3}];
 
     psr(abc) = "343434";
@@ -90,10 +88,11 @@ void test_shell0()
     psr(lambda_apply) = id_lambda.apply("xxxx"_psr);
 
     psr(xxxx0) = $curry([]() {return "wewe"_psr; });
+    xxxx0.apply();
     psr(xxxx1) = $curry([](Parser a) {return a; });
     psr(xxxx2) = $curry([](Parser a, Parser b) {return a - b; });
     psr(xxxx3) = $curry([](Parser a, Parser b, Parser c) {return (a, b) | c; });
-    psr(xxxx4) = $curry([](Parser a, Parser b, Parser c, Parser d) {return d | ((a, b) | c)[{2,2}]; });
+    psr(xxxx4) = $curry([](Parser a, Parser b, Parser c, Parser d) {return d | ((a, b) | c)[{2, 2}]; });
     psr(xxxx4_app) = xxxx4.apply(""_psr).apply("werw"_psr).apply("ewfwe"_psr).apply("wewfwef"_psr);
 }
 
@@ -119,38 +118,91 @@ void test_shell1()
 
     // [1-9][0-9]*
     psr(num) = (range('1', '9') - range('0', '9')[any_cnt]) | "0"_psr
-        <<= 
-        [](const core::ActionMaterial& am, core::Context&, std::string&) 
-        {
-            std::cout << am.m_token.to_std_string() << std::endl;
-            return true;
-        };
+        <<=
+        [](const ActionArgs& args)
+    {
+        std::cout << args.m_action_material.m_token.to_std_string() << std::endl;
+        return true;
+    };
 
-    psr(root) = ( num, "+"_psr, num, "="_psr, num);
+    psr(root) = (num, "+"_psr, num, "="_psr, num);
 
     std::size_t offset = 0;
-    const std::string script = R"(
-# commentd
-         23423 + 1032 = 24455 # comment
-# comment
-    )";
-
     core::Context ctx;
     std::string err;
-    // ctx.SetWhiteSpaces(wss); // BUG
-    psr(comment) = "#"_psr - negative_set("\n")[any_cnt] - "\n"_psr;
-    ctx.SetWhiteSpaces((ws | comment)[any_cnt]);
-    //ctx.SetWhiteSpaces(Parser::EatWss);
-    core::ScanState res = root.LoadScript(script.data(), script.size(), offset, ctx, err);
-    assert(core::ScanState::OK == res);
 
-    for (auto&& f : ctx.m_lazy_action)
+    {// eat wss case:
+        const std::string script = R"(
+
+         23423 + 1032 = 24455
+
+        )";
+
+        ctx.SetWhiteSpaces(wss); // or `ctx.SetWhiteSpaces(Parser::EatWss);`
+        core::ScanState res = root.ScanScript(script.data(), script.size(), offset, ctx, err);
+        assert(core::ScanState::OK == res);
+        std::pair<bool, std::size_t> ac_res = InvokeActions(ctx, err);
+        assert(ac_res.first);
+    }
+
+    { // eat wss and comment case:
+        const std::string script = R"(
+        #werwerw
+        # comment 。d
+                 23423 + 1032 = 24455 # comment
+        # comment
+        )";
+
+        // 中文 BUG
+        //const std::string script = R"(
+        //#werwerw
+        //# comment 。。。d
+        //         23423 + 1032 = 24455 # comment
+        //# comment
+        //)";
+
+        psr(comment) = "#"_psr - negative_set("\n")[any_cnt] - "\n"_psr;
+        ctx.SetWhiteSpaces((ws | comment)[any_cnt]);
+
+        ctx.ResetLazyAction(); // 清理前一个 ctx 的事件垃圾
+        core::ScanState res = root.ScanScript(script.data(), script.size(), offset, ctx, err);
+        assert(core::ScanState::OK == res);
+        std::pair<bool, std::size_t> ac_res = InvokeActions(ctx, err);
+        assert(ac_res.first);
+    }
+}
+
+void test_shell_unordered()
+{
+    using namespace lexpsr_shell;
+    decl_psr(num);
+
+    psr(root) = (num, "+"_psr, num, "="_psr, num);
+    num = (range('1', '9'), range('0', '9')[any_cnt]) | "0"_psr;
+
+    num <<=
+        [](const ActionArgs& args)
     {
-        if (! f.m_action_scanner->InvokeAction(f, ctx, err))
-        {
-            std::cerr << "Error." << std::endl;
-            return;
-        }
+        std::cout << args.m_action_material.m_token.to_std_string() << std::endl;
+        return true;
+    };
+
+    std::size_t offset = 0;
+    core::Context ctx;
+    std::string err;
+
+    {// eat wss case:
+        const std::string script = R"(
+
+         23423 + 1032 = 24455
+
+        )";
+
+        ctx.SetWhiteSpaces(wss); // or `ctx.SetWhiteSpaces(Parser::EatWss);`
+        core::ScanState res = root.ScanScript(script.data(), script.size(), offset, ctx, err);
+        assert(core::ScanState::OK == res);
+        std::pair<bool, std::size_t> ac_res = InvokeActions(ctx, err);
+        assert(ac_res.first);
     }
 }
 
@@ -158,12 +210,12 @@ void test_xml()
 {
 }
 
-
-
 int main()
 {
     test_core();
     test_shell0();
     test_shell1();
+    test_shell_unordered();
+    test_xml();
     return 0;
 }
