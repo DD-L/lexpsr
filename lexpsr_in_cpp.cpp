@@ -94,6 +94,8 @@ void test_shell0()
     psr(xxxx3) = $curry([](Parser a, Parser b, Parser c) {return (a, b) | c; });
     psr(xxxx4) = $curry([](Parser a, Parser b, Parser c, Parser d) {return d | ((a, b) | c)[{2, 2}]; });
     psr(xxxx4_app) = xxxx4.apply(""_psr).apply("werw"_psr).apply("ewfwe"_psr).apply("wewfwef"_psr);
+    psr(xxxx4_app2) = xxxx4.apply(""_psr, "werw"_psr).apply("ewfwe"_psr, "wewfwef"_psr);
+    psr(xxxx4_app3) = xxxx4.apply(""_psr, "werw"_psr, "ewfwe"_psr, "wewfwef"_psr);
 }
 
 //void err()
@@ -206,9 +208,232 @@ void test_shell_unordered()
     }
 }
 
-void test_xml()
-{
+void test_xml1()
+{ //  忽略 xml 开始与结尾 标记的比对逻辑， 也就是说 <a>xxx</b> ，其中 a != b 将是合法的。
+    const std::string script = R"(
+         <x1>
+             <a>a_v</a>
+             <b> b_v < /b>
+             <c>
+                <c1> 
+                    <d1> d1_v </d1>
+                    <d2> d2_v </d2>
+                </c1>
+                <c2> c2_v </c2>
+             </c>
+         </x1>
+    )";
+
+
+
+    //field node_begin = string;
+    //field node_end   = string;
+    //field leaf       = string;
+    //
+    //groupfield node;
+    //
+    //declare node;
+    //psr wss   = regex([\x0d\x0a\x20\x09\x0c\x0b]*); # 白字符
+    //psr ident = regex([a-zA-Z0-9_]+); # 根据实际需要修改 ident
+    //psr node_begin = ident nop;
+    //psr node_end   = ident nop;
+    //psr leaf   = ident nop;
+    //psr value  = leaf | node;
+    //psr values = value +;
+    //psr node   = wss "<" wss node_begin wss ">" wss values wss "<" wss "/" wss node_end ">" wss; 
+    //
+    //root = node;     
+
+
+    using namespace lexpsr_shell;
+
+    struct Ctx : core::Context {
+        std::size_t depth = 0;
+        std::string Spaces() const {
+            return std::string(depth * 2, ' ');
+        }
+    };
+
+    auto node_begin_ac = [](const ActionArgs& args) {
+        ((Ctx&)args.m_contex).depth++;
+        std::cout << ((Ctx&)args.m_contex).Spaces() << "<" << args.m_action_material.m_token.to_std_string() << ">" << std::endl;
+        return true;
+    };
+    auto node_end_ac = [](const ActionArgs& args) {
+        std::cout << ((Ctx&)args.m_contex).Spaces() << "</" << args.m_action_material.m_token.to_std_string() << ">" << std::endl;
+        ((Ctx&)args.m_contex).depth--;
+        return true;
+    };
+    auto leaf_ac = [](const ActionArgs& args) {
+        std::cout << ((Ctx&)args.m_contex).Spaces() << "  " << args.m_action_material.m_token.to_std_string() << std::endl;
+        return true;
+    };
+
+    /// <summary>
+    /// xml 文法
+    /// </summary>
+    decl_psr(node);
+
+    psr(_) = wss; // 白字符
+    psr(ident) = range('0', '9')('a', 'z')('A', 'Z')('_', '_')[at_least_1];
+    psr(node_begin) = ident <<= node_begin_ac;
+    psr(node_end) = ident <<= node_end_ac;
+    psr(leaf) = ident <<= leaf_ac;
+    psr(values) = (leaf | node)[at_least_1];
+    node = (_, "<"_psr, _, node_begin, _, ">"_psr, _, values, _, "<"_psr, _, "/"_psr, _, node_end, _, ">"_psr, _);
+
+    /////////////////////
+    std::string err;
+    std::size_t offset = 0;
+    Ctx ctx;
+    ScanState ss = node.ScanScript(script.data(), script.size(), offset, ctx, err);
+    assert(ScanState::OK == ss && script.size() == offset);
+    auto res = InvokeActions(ctx, err);
+    assert(res.first);
+
+    std::cout << "-----------" << std::endl;
 }
+
+void test_xml2()
+{ // 将 xml 开始与结尾 标记的比对逻辑，放在自动机的栈上（在 InvokeActions() 中发现错误）
+    const std::string script = R"(
+         <x1>
+             <a>a_v</a>
+             <b> b_v < /b>
+             <c>
+                <c1> 
+                    <d1> d1_v </d1>
+                    <d2> d2_v </d2>
+                </c1>
+                <c2> c2_v </c2>
+             </cxxx>
+         </x1>
+    )";
+
+    using namespace lexpsr_shell;
+
+    struct Ctx : core::Context {
+        std::vector<std::string> m_node_names;
+        std::string Spaces() const {
+            return std::string(m_node_names.size() * 2, ' ');
+        }
+    };
+
+    auto node_begin_ac = [](const ActionArgs& args) {
+        const std::string begin = args.m_action_material.m_token.to_std_string();
+        Ctx& ctx = (Ctx&)args.m_contex;
+        ctx.m_node_names.push_back(begin);
+        std::cout << ctx.Spaces() << "<" << begin << ">" << std::endl;
+        return true;
+    };
+    auto node_end_ac = [](const ActionArgs& args) {
+        const std::string end = args.m_action_material.m_token.to_std_string();
+        Ctx& ctx = (Ctx&)args.m_contex;
+        const std::string begin = ctx.m_node_names.empty() ? "" : ctx.m_node_names.back();
+        if (begin != end) {  // <--- 注意这里, 可以判断 begin 与 end 是否匹配
+            args.m_error_message = "The start and end of an xml node do not match. <" + begin + "> != </" + end + ">";
+            return false;
+        }
+        std::cout << ctx.Spaces() << "</" << end << ">" << std::endl;
+        ((Ctx&)args.m_contex).m_node_names.pop_back();
+        return true;
+    };
+    auto leaf_ac = [](const ActionArgs& args) {
+        std::cout << ((Ctx&)args.m_contex).Spaces() << "  " << args.m_action_material.m_token.to_std_string() << std::endl;
+        return true;
+    };
+
+    /// <summary>
+    /// xml 文法
+    /// </summary>
+    decl_psr(node);
+
+    psr(_) = wss; // 白字符
+    psr(ident) = range('0', '9')('a', 'z')('A', 'Z')('_', '_')[at_least_1];
+    psr(node_begin) = ident <<= node_begin_ac;
+    psr(node_end) = ident <<= node_end_ac;
+    psr(leaf) = ident <<= leaf_ac;
+    psr(values) = (leaf | node)[at_least_1];
+    node = (_, "<"_psr, _, node_begin, _, ">"_psr, _, values, _, "<"_psr, _, "/"_psr, _, node_end, _, ">"_psr, _);
+
+    /////////////////////
+    std::string err;
+    std::size_t offset = 0;
+    Ctx ctx;
+    ScanState ss = node.ScanScript(script.data(), script.size(), offset, ctx, err);
+    assert(ScanState::OK == ss && script.size() == offset);
+    auto res = InvokeActions(ctx, err); // 在这个过程中发现 begin - end 不匹配的错误
+    if (!res.first) {
+        std::cerr << err << std::endl;
+    }
+    std::cout << "-----------" << std::endl;
+}
+//
+//void test_xml3()
+//{ // 可以利用 lambda 演算系统，在 ScanScript() 阶段就能发现错误
+//    const std::string script = R"(
+//         <x1>
+//             <a>a_v</a>
+//             <b> b_v < /b>
+//             <c>
+//                <c1> 
+//                    <d1> d1_v </d1>
+//                    <d2> d2_v </d2>
+//                </c1>
+//                <c2> c2_v </c2>
+//             </cxxx>
+//         </x1>
+//    )";
+//
+//    using namespace lexpsr_shell;
+//    std::size_t offset = 0;
+//    core::Context ctx;
+//    std::string err;
+//
+//    /// <summary>
+//    /// xml 文法  !!!!!!!!!!!!! 未完成 ！！！！！！！！！！！！！！！！！
+//    /// </summary>
+//    decl_psr(node);
+//
+//    psr(_) = wss; // 白字符
+//    psr(ident) = range('0', '9')('a', 'z')('A', 'Z')('_', '_')[at_least_1];
+//    //psr(node_begin) = ident;
+//    //psr(node_end)   = ident; 
+//    psr(leaf) = ident;
+//    psr(values) = (leaf | node)[at_least_1];
+//
+//    psr(xxx) = $curry([&script, &offset, &ctx, &err](Parser node_begin) -> Parser {
+//
+//        std::size_t old_offset = offset;
+//        psr(p) = node_begin | fatal_if(nop, "xxxxxx");
+//        //p(script.data(), script.size(), offset, ctx, err);
+//        //return Parser(script.substr(old_offset, offset - old_offset));
+//
+//        if (ScanState::OK == p(script.data(), script.size(), offset, ctx, err)) {
+//            return Parser(script.substr(old_offset, offset - old_offset));
+//        }
+//
+//
+//
+//        return Parser(UnbindPsr());
+//    });
+//
+//    psr(node_begin) = xxx;
+//    psr(node_end) = xxx.apply(ident);
+//
+//
+//    node = (_, "<"_psr, _, node_begin, _, ">"_psr, _, values, _, "<"_psr, _, "/"_psr, _, node_end, _, ">"_psr, _);
+//
+//    ///////////
+//
+//
+//    ScanState ss = node.ScanScript(script.data(), script.size(), offset, ctx, err);
+//    if (ScanState::OK != ss) {
+//        std::cout << err << std::endl;
+//    }
+//    assert(ScanState::OK == ss && script.size() == offset);
+//    std::cout << "-----------" << std::endl;
+//}
 
 int main()
 {
@@ -216,6 +441,8 @@ int main()
     test_shell0();
     test_shell1();
     test_shell_unordered();
-    test_xml();
+    test_xml1();
+    test_xml2();
+    //test_xml3();
     return 0;
 }
