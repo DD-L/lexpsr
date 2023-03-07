@@ -623,9 +623,9 @@ namespace _LEXPARSER_SHELL
         struct AnyCnt {};
         struct AtLeast1 {};
 
-        using any_cnt_t = LoopCntPair(*)(AnyCnt*);
+        using any_cnt_t    = LoopCntPair(*)(AnyCnt*);
         using at_least_1_t = LoopCntPair(*)(AtLeast1*);
-        using at_most_1_t = LoopCntPair(*)(AtMost1*);
+        using at_most_1_t  = LoopCntPair(*)(AtMost1*);
     } // namespace details
 
     namespace { //  free function
@@ -733,10 +733,10 @@ namespace _LEXPARSER_SHELL
         template <class... Psrs>
         Parser apply(const Parser& arg, Psrs&&... rest) const {
             assert(std::get_if<LambdaPsr>(&m_psr));
-            return std::get<LambdaPsr>(m_psr)(arg, std::forward<Psrs>(rest)...);
+            return std::get<LambdaPsr>(m_psr)(arg).apply(std::forward<Psrs>(rest)...);
         }
 
-        const Parser& apply() const { return *this; } // for 完备性
+        const Parser& apply() const { return *this; }
 
         // CharRangePsr helper function
         Parser& operator()(const std::pair<char, char>& range)
@@ -887,19 +887,8 @@ namespace _LEXPARSER_SHELL
             return Parser(ActionPsr{ Parser(expr), action });
         }
 
-        [[maybe_unused]] Parser& operator<<=(Parser& expr, const Action& action) {
-            expr = Parser(ActionPsr{ expr.Unwrap(), action });
-            return expr;
-        }
-
         template <class T>
         [[maybe_unused]] Parser operator<<=(const T& expr, const details::action_wrap_t& action) {
-            return expr <<= [action](const core::ActionMaterial& a, core::Context& c, std::string& e) -> bool {
-                return action(ActionArgs{ a, c, e });
-            };
-        }
-
-        [[maybe_unused]] Parser& operator<<=(Parser& expr, const details::action_wrap_t& action) {
             return expr <<= [action](const core::ActionMaterial& a, core::Context& c, std::string& e) -> bool {
                 return action(ActionArgs{ a, c, e });
             };
@@ -960,8 +949,7 @@ namespace _LEXPARSER_SHELL
                     return $curry(
                         [=](auto&&...xs) -> decltype(f(x, xs...)) {
                             return (f(x, xs...));
-                        }
-                    );
+                        });
                 }));
             }
             else {
@@ -973,6 +961,7 @@ namespace _LEXPARSER_SHELL
         [[maybe_unused]] const Parser _false = _not(nop).SetName("_false");  // `_false` variable，永远失配
         [[maybe_unused]] const Parser ws(Scanner(Parser::EatWs), "ws");      // ws  吃掉一个白字符，失败返回失配
         [[maybe_unused]] const Parser wss(Scanner(Parser::EatWss), "wss");   // wss 吃掉一批连续的白字符，永远成功
+
 
         //////////////////
         std::pair<bool, std::size_t> InvokeActions(core::Context& ctx, std::string& err) {
