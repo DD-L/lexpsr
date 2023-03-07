@@ -21,13 +21,23 @@
 #define _LEXPARSER_SHELL lexpsr_shell
 #endif // ! _LEXPARSER_SHELL
 
+#ifndef _LEXPSR_KEYWORD_PSR
+#define _LEXPSR_KEYWORD_PSR(var) Parser var(#var); _PsrForward(var)
+#endif // ! _LEXPSR_KEYWORD_PSR
+
+#ifndef _LEXPSR_KEYWORD_DECL_PSR
+#define _LEXPSR_KEYWORD_DECL_PSR(var) Parser var(std::make_shared<Parser>(UnbindPsr()), #var); _PsrForward(var)
+#endif // ! _LEXPSR_KEYWORD_DECL_PSR
+
+//////////////////////////////////// <psr.h>
 #ifndef psr
-#define psr(var) Parser var(#var); _PsrForward(var)
+#define psr(var) _LEXPSR_KEYWORD_PSR(var)
 #endif // ! psr
 
 #ifndef decl_psr
-#define decl_psr(var) Parser var(std::make_shared<Parser>(UnbindPsr()), #var); _PsrForward(var)
+#define decl_psr(var) _LEXPSR_KEYWORD_DECL_PSR(var)
 #endif // ! decl_psr
+///////////////////////////////////// </psr.h>
 
 namespace _LEXPARSER_SHELL { struct Parser; }
 
