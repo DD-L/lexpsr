@@ -286,7 +286,7 @@ namespace _LEXPARSER_CORE {
         ScanFunc    m_member;
     }; // class Loop
 
-    // 三值布尔的逻辑非（第三态是 Fatal）。类似于负零宽断言: LogicNotScanner 不消耗字符，不产生任何负作用，区别于“负字符集”，后者是消耗字符的
+    // 三值布尔的逻辑非（第三态是 Fatal）。类似于负零宽断言: LogicNotScanner 不消耗字符，不产生任何副作用，区别于“负字符集”，后者是消耗字符的
     class LogicNotScanner : public details::DefaultClass {
     public:
         using details::DefaultClass::DefaultClass;
@@ -310,7 +310,7 @@ namespace _LEXPARSER_CORE {
                 case ScanState::Dismatch: ss = ScanState::OK;        break;
                 default:                  ss = ScanState::Fatal;     break;
                 }
-                offset = old_offset; // 不产生任何负作用
+                offset = old_offset; // 不产生任何副作用
                 ctx.m_lazy_action.resize(old_lazy_cnt);
                 return ss;
             }
