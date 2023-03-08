@@ -302,8 +302,8 @@ namespace _LEXPARSER_CORE {
 
         ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept {
             if (m_scanner) {
-                std::size_t old_offset   = offset;
-                std::size_t old_lazy_cnt = ctx.m_lazy_action.size();
+                const std::size_t old_offset   = offset;
+                const std::size_t old_lazy_cnt = ctx.m_lazy_action.size();
                 ScanState ss = m_scanner(data, len, offset, ctx, err);
                 switch (ss) {
                 case ScanState::OK:       ss = ScanState::Dismatch;  break;
