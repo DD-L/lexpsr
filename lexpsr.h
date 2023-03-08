@@ -286,7 +286,7 @@ namespace _LEXPARSER_CORE {
         ScanFunc    m_member;
     }; // class Loop
 
-    // 三值布尔的逻辑非（第三态是 Fatal）。类似于负零宽断言: LogicNotScanner 不消耗字符，区别于“负字符集”，后者是消耗字符的
+    // 三值布尔的逻辑非（第三态是 Fatal）。类似于负零宽断言: LogicNotScanner 不消耗字符，不产生任何负作用，区别于“负字符集”，后者是消耗字符的
     class LogicNotScanner : public details::DefaultClass {
     public:
         using details::DefaultClass::DefaultClass;
@@ -302,19 +302,17 @@ namespace _LEXPARSER_CORE {
 
         ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept {
             if (m_scanner) {
-                std::size_t old_offset = offset;
+                std::size_t old_offset   = offset;
+                std::size_t old_lazy_cnt = ctx.m_lazy_action.size();
                 ScanState ss = m_scanner(data, len, offset, ctx, err);
                 switch (ss) {
-                case ScanState::OK:
-                    offset = old_offset;
-                    return ScanState::Dismatch;
-                case ScanState::Dismatch:
-                    assert(offset == old_offset); // m_scanner 内部保证
-                    offset = old_offset;
-                    return ScanState::OK;
-                default:
-                    return ScanState::Fatal;
+                case ScanState::OK:       ss = ScanState::Dismatch;  break;
+                case ScanState::Dismatch: ss = ScanState::OK;        break;
+                default:                  ss = ScanState::Fatal;     break;
                 }
+                offset = old_offset; // 不产生任何负作用
+                ctx.m_lazy_action.resize(old_lazy_cnt);
+                return ss;
             }
 
             err = "logic_error: LogicNotScanner is empty";
