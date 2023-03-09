@@ -21,23 +21,25 @@
 #define _LEXPARSER_SHELL lexpsr_shell
 #endif // ! _LEXPARSER_SHELL
 
-#ifndef _LEXPSR_KEYWORD_PSR
-#define _LEXPSR_KEYWORD_PSR(var) Parser var(#var); _PsrForward(var)
-#endif // ! _LEXPSR_KEYWORD_PSR
+#ifndef LEXPSR_KEYWORD_PSR
+#define LEXPSR_KEYWORD_PSR(var) _LEXPARSER_SHELL::Parser var(#var); _LEXPARSER_SHELL::_PsrForward(var)
+#endif // ! LEXPSR_KEYWORD_PSR
 
-#ifndef _LEXPSR_KEYWORD_DECL_PSR
-#define _LEXPSR_KEYWORD_DECL_PSR(var) Parser var(std::make_shared<Parser>(UnbindPsr()), #var); _PsrForward(var)
-#endif // ! _LEXPSR_KEYWORD_DECL_PSR
+#ifndef LEXPSR_KEYWORD_DECL_PSR
+#define LEXPSR_KEYWORD_DECL_PSR(var) \
+    _LEXPARSER_SHELL::Parser var(std::make_shared<_LEXPARSER_SHELL::Parser>(_LEXPARSER_SHELL::UnbindPsr()), #var); \
+    _LEXPARSER_SHELL::_PsrForward(var)
+#endif // ! LEXPSR_KEYWORD_DECL_PSR
 
-//////////////////////////////////// <psr.h>
+#ifdef LEXPSR_SHORT_KEYWORDS
 #ifndef psr
-#define psr(var) _LEXPSR_KEYWORD_PSR(var)
+#define psr(var) LEXPSR_KEYWORD_PSR(var)
 #endif // ! psr
 
 #ifndef decl_psr
-#define decl_psr(var) _LEXPSR_KEYWORD_DECL_PSR(var)
+#define decl_psr(var) LEXPSR_KEYWORD_DECL_PSR(var)
 #endif // ! decl_psr
-///////////////////////////////////// </psr.h>
+#endif // LEXPSR_SHORT_KEYWORDS
 
 namespace _LEXPARSER_SHELL { struct Parser; }
 
@@ -50,7 +52,6 @@ namespace _LEXPARSER_CORE {
         std::size_t len = 0;
 
         StrRef() = default;
-
         StrRef(const char* d, std::size_t l) : data(d), len(l) {}
 
         template <class Iter>
@@ -60,7 +61,6 @@ namespace _LEXPARSER_CORE {
         StrRef(const char(&arr)[N]) : data(arr), len(N - 1) { static_assert(N != 0, "Error"); }
 
         char operator[](std::size_t index) const { return data[index]; } // may crash
-
         std::string to_std_string() const { return std::string(data, len); }
     }; // struct StrRef
 
@@ -68,9 +68,7 @@ namespace _LEXPARSER_CORE {
     struct ActionMaterial;
     class ActionScanner;
 
-    enum class ScanState {
-        OK = 0, Dismatch, Fatal // 进入引导词之后的失配即 Fatal
-    };
+    enum class ScanState { OK = 0, Dismatch, Fatal }; // 进入引导词之后的失配即 Fatal
 
     typedef std::function<ScanState(const char*, std::size_t, std::size_t&, Context&, std::string&)> ScanFunc;
     typedef std::function<bool(const ActionMaterial&, Context& ctx, std::string& err)>               Action; // 识别动作
@@ -132,13 +130,8 @@ namespace _LEXPARSER_CORE {
         }
 
     private:
-        const ScanFunc& IgnoreWhiteSpaces() const {
-            return m_white_spaces;
-        }
-
-        bool InWhiteSpacesPsr() const {
-            return m_in_white_spaces;
-        }
+        const ScanFunc& IgnoreWhiteSpaces() const { return m_white_spaces; }
+        bool InWhiteSpacesPsr() const { return m_in_white_spaces; }
 
         struct WhiteSpacesGuard {
             bool& m_white_spaces_guard;
@@ -146,9 +139,7 @@ namespace _LEXPARSER_CORE {
             ~WhiteSpacesGuard() { m_white_spaces_guard = false; }
         };
 
-        WhiteSpacesGuard WhiteSpacesScopeGuard() {
-            return WhiteSpacesGuard(m_in_white_spaces);
-        }
+        WhiteSpacesGuard WhiteSpacesScopeGuard() { return WhiteSpacesGuard(m_in_white_spaces); }
     }; // class Context
 
     namespace details {
@@ -666,9 +657,8 @@ namespace _LEXPARSER_SHELL
     using NopPsr           = core::Nop;
 
     struct Parser;
-    struct LambdaPsr : std::function<Parser(const Parser&)> {
+    struct LambdaPsr : std::function<Parser(const Parser&)> { // currying. for example, (Parser -> Parser) -> Parser == Parser -> (Parser -> Parser).
         using std::function<Parser(const Parser&)>::function;
-        // currying. for example, (Parser -> Parser) -> Parser == Parser -> (Parser -> Parser).
     };
 
     struct IntPsr {}; // 表示数字的 psr , 兼容丘奇数与立即数 @TODO
@@ -764,7 +754,7 @@ namespace _LEXPARSER_SHELL
             return Parser(LoopPsr{ *this, pair.first, pair.second });
         }
 
-#if (__cplusplus > 202002) || (defined(_MSC_VER) && (_MSC_VER > 1934))
+#if (__cplusplus > 202300) || (defined(_MSC_VER) && (_MSC_VER > 1938))
         Parser operator[](std::size_t _min, std::size_t _max) const { // C++ 23
             return (*this)[details::LoopCntPair{ _min , _max }];
         }
@@ -848,15 +838,13 @@ namespace _LEXPARSER_SHELL
     namespace details {
         template <class T>
         static inline Parser _MakeSeqOrBranchPair(const Parser& a, const Parser& b) {
-            if (a.Anonymous()) {
-                // 左结合的连接符，-，会导致 a 有可能也是个 SequenceExpr， 如果 a 是匿名的需展开
+            if (a.Anonymous()) { // 左结合的连接符，-，会导致 a 有可能也是个 SequenceExpr， 如果 a 是匿名的需展开
                 const T* _a = std::get_if<T>(&a.m_psr);
                 if (nullptr != _a) {
                     T copy = *_a; // copy 一份
                     return Parser(copy.AddMember({ b }));
                 }
             }
-
             return Parser(T{ a, b });
         }
 
@@ -970,7 +958,6 @@ namespace _LEXPARSER_SHELL
         [[maybe_unused]] const Parser _false   = next_not(nop).SetName("_false");  // `_false`，永远失配
         [[maybe_unused]] const Parser ws(Scanner(Parser::EatWs), "ws");            // ws  吃掉一个白字符，失败返回失配
         [[maybe_unused]] const Parser wss(Scanner(Parser::EatWss), "wss");         // wss 吃掉一批连续的白字符，永远成功
-
 
         //////////////////
         std::pair<bool, std::size_t> InvokeActions(core::Context& ctx, std::string& err) {

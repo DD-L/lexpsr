@@ -1,4 +1,5 @@
-﻿#include "lexpsr.h"
+﻿#define LEXPSR_SHORT_KEYWORDS
+#include "lexpsr.h"
 
 int test_core()
 {
