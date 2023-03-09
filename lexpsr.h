@@ -704,14 +704,8 @@ namespace _LEXPARSER_SHELL
         template <class T,
             class = typename std::enable_if<!std::is_same<UnbindPsr, T>::value>::type,
             class = std::void_t<decltype(std::declval<VariantParser>() = std::declval<T>())>>
-            void operator=(const T& expr) noexcept {
-            //Unwrap() = expr; // 会有警告，所以写成下面这种
-            if (std::get_if<PreDeclPsr>(&m_psr)) {
-                (*std::get<PreDeclPsr>(m_psr)) = expr;
-            }
-            else {
-                m_psr = expr;
-            }
+        void operator=(const T& expr) noexcept {
+            Unwrap().m_psr = expr;
         }
 
         void operator=(const Parser& expr) noexcept {
