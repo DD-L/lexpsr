@@ -730,8 +730,8 @@ namespace _LEXPARSER_SHELL
 
         template <class... Psrs>
         Parser apply(const Parser& arg, Psrs&&... rest) const {
-            assert(std::get_if<LambdaPsr>(&m_psr));
-            return std::get<LambdaPsr>(m_psr)(arg).apply(std::forward<Psrs>(rest)...);
+            assert(std::get_if<LambdaPsr>(&(Unwrap().m_psr)));
+            return std::get<LambdaPsr>(Unwrap().m_psr)(arg).apply(std::forward<Psrs>(rest)...);
         }
 
         const Parser& apply() const { return *this; }
