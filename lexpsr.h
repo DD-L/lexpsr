@@ -661,7 +661,7 @@ namespace _LEXPARSER_SHELL
     using LoopPsr          = core::Loop;
     using CharSetPsr       = core::CharBranch;
     using ActionPsr        = core::ActionScanner;
-    using NotPsr           = core::LogicNotScanner;
+    using NextNotPsr       = core::LogicNotScanner;
     using FatalIfPsr       = core::FatalIf;
     using NopPsr           = core::Nop;
 
@@ -676,7 +676,7 @@ namespace _LEXPARSER_SHELL
 
     struct Parser {
         typedef std::variant<
-            UnbindPsr, LiteralStringPsr, CharSetPsr, SequencePsr, BranchPsr, LoopPsr, ActionPsr, NotPsr, FatalIfPsr, Scanner, NopPsr, LambdaPsr,
+            UnbindPsr, LiteralStringPsr, CharSetPsr, SequencePsr, BranchPsr, LoopPsr, ActionPsr, NextNotPsr, FatalIfPsr, Scanner, NopPsr, LambdaPsr,
             PreDeclPsr
         > VariantParser;
 
@@ -932,8 +932,8 @@ namespace _LEXPARSER_SHELL
             return negative_range(pair.first, pair.second);
         }
 
-        [[maybe_unused]] Parser _not(const Parser& expr) { // 函数名添加 _ 前缀是为了避免与 not 操作符冲突
-            return Parser(NotPsr(expr));
+        [[maybe_unused]] Parser next_not(const Parser& expr) { // 函数名添加 _ 前缀是为了避免与 not 操作符冲突
+            return Parser(NextNotPsr(expr));
         }
 
         [[maybe_unused]] Parser fatal_if(const Parser& expr, const std::string& errMsg = "") {
@@ -965,10 +965,11 @@ namespace _LEXPARSER_SHELL
             }
         }
 
-        [[maybe_unused]] const Parser nop = Parser(NopPsr(), "nop");      // `nop` variable，永远成功
-        [[maybe_unused]] const Parser _false = _not(nop).SetName("_false");  // `_false` variable，永远失配
-        [[maybe_unused]] const Parser ws(Scanner(Parser::EatWs), "ws");      // ws  吃掉一个白字符，失败返回失配
-        [[maybe_unused]] const Parser wss(Scanner(Parser::EatWss), "wss");   // wss 吃掉一批连续的白字符，永远成功
+        [[maybe_unused]] const Parser  epsilon = Parser(NopPsr(), "epsilon");      // `epsilon` 永远成功，等价于 nop ???
+        [[maybe_unused]] const Parser& nop     = epsilon;
+        [[maybe_unused]] const Parser _false   = next_not(nop).SetName("_false");  // `_false`，永远失配
+        [[maybe_unused]] const Parser ws(Scanner(Parser::EatWs), "ws");            // ws  吃掉一个白字符，失败返回失配
+        [[maybe_unused]] const Parser wss(Scanner(Parser::EatWss), "wss");         // wss 吃掉一批连续的白字符，永远成功
 
 
         //////////////////

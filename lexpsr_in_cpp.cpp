@@ -68,7 +68,7 @@ void test_shell0()
     i = set("qazwsxwdc") <<= [](const ActionArgs&) -> bool { return true; };
     j = range('0', '9')('a', 'z')('A', 'Z')[{2, 2}];
 
-    k = _not(h) | a;           // 逻辑非
+    k = next_not(h) | a;           // 逻辑非
     l = fatal_if(j, "errMsg"); // 致命错误
     m = $([](const ScanArgs&) {  return ScanState::OK; })[{2, 4}];    // 自由函数
     n = "xxx"_psr[any_cnt] | "xxxx"_psr[loop_cnt(3)] | "xx"_psr[at_least_1] | "eee"_psr[at_least(5)] | "sddd"_psr[at_most_1] | "ewrwe"_psr[at_most(5u)] | c[loop_cnt(3, 6)][{2, 3}];
@@ -435,6 +435,7 @@ void test_xml2()
 //    std::cout << "-----------" << std::endl;
 //}
 
+
 int main()
 {
     test_core();
@@ -444,5 +445,20 @@ int main()
     test_xml1();
     test_xml2();
     //test_xml3();
+
+    //auto node = []<class V, class N>(V value, N next) {
+    //    return [=](bool which) {
+    //        return which ? std::variant<V, N>(value) : std::variant<V, N>(next);
+    //    };
+    //};
+    //
+    //auto lst = node(1, node(2, node(3, nullptr)));
+    //
+    // auto value = std::get<0>(lst(true));
+    // std::cout << value << std::endl;
+    // auto next_node = std::get<1>(lst(false));
+    // auto next_value = std::get<0>(next_node(true));
+    // std::cout << next_value << std::endl;
+
     return 0;
 }
