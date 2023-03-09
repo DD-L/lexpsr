@@ -369,73 +369,57 @@ void test_xml2()
     }
     std::cout << "-----------" << std::endl;
 }
-//
-//void test_xml3()
-//{ // 可以利用 lambda 演算系统，在 ScanScript() 阶段就能发现错误
-//    const std::string script = R"(
-//         <x1>
-//             <a>a_v</a>
-//             <b> b_v < /b>
-//             <c>
-//                <c1> 
-//                    <d1> d1_v </d1>
-//                    <d2> d2_v </d2>
-//                </c1>
-//                <c2> c2_v </c2>
-//             </cxxx>
-//         </x1>
-//    )";
-//
-//    using namespace lexpsr_shell;
-//    std::size_t offset = 0;
-//    core::Context ctx;
-//    std::string err;
-//
-//    /// <summary>
-//    /// xml 文法  !!!!!!!!!!!!! 未完成 ！！！！！！！！！！！！！！！！！
-//    /// </summary>
-//    decl_psr(node);
-//
-//    psr(_) = wss; // 白字符
-//    psr(ident) = range('0', '9')('a', 'z')('A', 'Z')('_', '_')[at_least_1];
-//    //psr(node_begin) = ident;
-//    //psr(node_end)   = ident; 
-//    psr(leaf) = ident;
-//    psr(values) = (leaf | node)[at_least_1];
-//
-//    psr(xxx) = $curry([&script, &offset, &ctx, &err](Parser node_begin) -> Parser {
-//
-//        std::size_t old_offset = offset;
-//        psr(p) = node_begin | fatal_if(nop, "xxxxxx");
-//        //p(script.data(), script.size(), offset, ctx, err);
-//        //return Parser(script.substr(old_offset, offset - old_offset));
-//
-//        if (ScanState::OK == p(script.data(), script.size(), offset, ctx, err)) {
-//            return Parser(script.substr(old_offset, offset - old_offset));
-//        }
-//
-//
-//
-//        return Parser(UnbindPsr());
-//    });
-//
-//    psr(node_begin) = xxx;
-//    psr(node_end) = xxx.apply(ident);
-//
-//
-//    node = (_, "<"_psr, _, node_begin, _, ">"_psr, _, values, _, "<"_psr, _, "/"_psr, _, node_end, _, ">"_psr, _);
-//
-//    ///////////
-//
-//
-//    ScanState ss = node.ScanScript(script.data(), script.size(), offset, ctx, err);
-//    if (ScanState::OK != ss) {
-//        std::cout << err << std::endl;
-//    }
-//    assert(ScanState::OK == ss && script.size() == offset);
-//    std::cout << "-----------" << std::endl;
-//}
 
+
+void test_xml3()
+{ // 可以利用 lambda 演算系统，在 ScanScript() 阶段就能发现错误
+    const std::string script = R"(
+         <x1>
+             <a>a_v</a>
+             <b> b_v < /b>
+             <c>
+                <c1> 
+                    <d1> d1_v </d1>
+                    <d2> d2_v </d2>
+                </c1>
+                <c2> c2_v </c2>
+             </cxxx>
+         </x1>
+    )";
+
+    using namespace lexpsr_shell;
+
+    /// <summary>
+    /// xml 文法  !!!!!!!!!!!!! 未完成 ！！！！！！！！！！！！！！！！！
+    /// </summary>
+    psr(_) = wss; // 白字符
+    psr(ident) = range('0', '9')('a', 'z')('A', 'Z')('_', '_')[at_least_1];
+    psr(leaf) = ident;
+
+    decl_psr(node) = $curry([&_, &leaf, &node](Parser ident) -> Parser {
+        psr(values) = (leaf | node.apply(ident))[at_least_1];
+        psr(node_name);
+        return (
+            _, "<"_psr, _, 
+            ident // .as(node_name)   // <---- 这里未完成
+            , _, ">"_psr, _, values, _, "<"_psr, _, "/"_psr, _, 
+            (node_name | fatal_if(nop, "The start and end of an xml node do not match.")),
+            _, ">"_psr, _
+        );
+    });
+
+    
+    ///////////
+    std::size_t offset = 0;
+    core::Context ctx;
+    std::string err;
+    ScanState ss = node.apply(ident).ScanScript(script.data(), script.size(), offset, ctx, err);
+    if (ScanState::OK != ss) {
+        std::cout << err << std::endl;
+    }
+    assert(ScanState::OK == ss && script.size() == offset);
+    std::cout << "-----------" << std::endl;
+}
 
 int main()
 {
@@ -445,7 +429,7 @@ int main()
     test_shell_unordered();
     test_xml1();
     test_xml2();
-    //test_xml3();
+    //test_xml3(); // 未完成，暂时注释掉
 
     //auto node = []<class V, class N>(V value, N next) {
     //    return [=](bool which) {
