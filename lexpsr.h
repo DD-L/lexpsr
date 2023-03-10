@@ -760,7 +760,13 @@ namespace _LEXPARSER_SHELL
 
         bool Anonymous() const { return Name().empty(); }
         const std::string& Name() const { return m_name; }
-        Parser& SetName(const std::string& name) { m_name = name; return *this; }
+        Parser& SetName(const std::string& name) {
+            if (std::get_if<PreDeclPsr>(&m_psr)) {
+                Unwrap().m_name = name;
+            } 
+            m_name = name; 
+            return *this; 
+        }
 
         ScanState operator()(const char* script, std::size_t len, std::size_t& offset, core::Context& ctx, std::string& err) const {
             ScanState ret = ScanState::Fatal;
