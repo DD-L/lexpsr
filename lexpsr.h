@@ -758,6 +758,20 @@ namespace _LEXPARSER_SHELL
         Parser operator[](details::any_cnt_t) const { return (*this)[any_cnt()]; }
         Parser operator[](details::at_least_1_t) const { return (*this)[at_least_1()]; }
 
+        Parser& AsStrPsr(Parser& out) {
+#pragma warning("AsStrPsr")
+            //out = $curry([](Parser p) {
+            //    //return Parser(LiteralStringPsr(std::string(begin, len)));
+            //    return p;
+            //});
+
+            m_callback = [&out](core::StrRef tok) {
+                out = Parser(LiteralStringPsr(tok.to_std_string()));
+            };
+
+            return *this;
+        }
+
         bool Anonymous() const { return Name().empty(); }
         const std::string& Name() const { return m_name; }
         Parser& SetName(const std::string& name) {

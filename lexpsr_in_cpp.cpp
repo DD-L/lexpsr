@@ -396,13 +396,13 @@ void test_xml3()
     psr(ident) = range('0', '9')('a', 'z')('A', 'Z')('_', '_')[at_least_1];
     psr(leaf) = ident;
 
-    decl_psr(node) = $curry([&_, &leaf, &node](Parser ident) -> Parser {
+    decl_psr(node) = $curry([&_, &leaf, &node](Parser ident) {
         psr(values) = (leaf | node.apply(ident))[at_least_1];
         psr(node_name);
         return (
-            _, "<"_psr, _, 
-            ident // .as(node_name)   // <---- 这里未完成
-            , _, ">"_psr, _, values, _, "<"_psr, _, "/"_psr, _, 
+            _, "<"_psr, _,
+            ident.AsStrPsr(node_name)
+            , _, ">"_psr, _, values, _, "<"_psr, _, "/"_psr, _,
             (node_name | fatal_if(nop, "The start and end of an xml node do not match.")),
             _, ">"_psr, _
         );
