@@ -171,9 +171,8 @@ namespace _LEXPARSER_CORE {
                 }
             }
 
-            // 允许空串
             ctx.m_scanner_info = m_member.size();
-            return ScanState::OK;
+            return ScanState::OK; // 允许空串
         }
 
         Seq& AddMember(std::initializer_list<ScanFunc> member) {
@@ -252,11 +251,13 @@ namespace _LEXPARSER_CORE {
             for (; loop_cnt < m_max; ++loop_cnt) {
                 oldOffset = offset;
                 ScanState ss = m_member(data, len, offset, ctx, err);
-                if (ScanState::OK != ss) {
+                if (ScanState::Dismatch == ss) {
                     offset = oldOffset;
                     break;
                 }
-                // @TODO 致命错误，也当失配处理？
+                else if (ScanState::Fatal == ss) {// @TODO 致命错误，也当失配处理？
+                    return ScanState::Fatal;
+                }
             }
 
             ctx.m_scanner_info = loop_cnt;
@@ -659,6 +660,7 @@ namespace _LEXPARSER_SHELL
     struct Parser;
     struct LambdaPsr : std::function<Parser(const Parser&)> { // currying. for example, (Parser -> Parser) -> Parser == Parser -> (Parser -> Parser).
         using std::function<Parser(const Parser&)>::function;
+        std::shared_ptr<Parser> m_arg;  // 携带的实参
     };
 
     struct IntPsr {}; // 表示数字的 psr , 兼容丘奇数与立即数 @TODO
@@ -723,12 +725,28 @@ namespace _LEXPARSER_SHELL
         }
 
         template <class... Psrs>
+        Parser with_args(const Parser& arg, Psrs&&... rest) const {
+            assert(std::get_if<LambdaPsr>(&(Unwrap().m_psr)));
+            auto copy = std::get<LambdaPsr>(Unwrap().m_psr);  // <-- @TODO 难题这里如何实现反科里化？将 rest 用上
+            copy.m_arg = std::make_shared<Parser>(arg);
+            return Parser(copy, m_name); //.with_args(std::forward<Psrs>(rest)...);
+        }
+        const Parser& with_args() const { return *this; }
+
+        template <class... Psrs>
         Parser apply(const Parser& arg, Psrs&&... rest) const {
             assert(std::get_if<LambdaPsr>(&(Unwrap().m_psr)));
             return std::get<LambdaPsr>(Unwrap().m_psr)(arg).apply(std::forward<Psrs>(rest)...);
         }
-
         const Parser& apply() const { return *this; }
+
+        Parser& slice_as_str_psr(Parser& out) {
+            m_slice_callback = [out](core::StrRef tok) mutable {
+                assert(std::get_if<PreDeclPsr>(&out.m_psr)); // out 中的 shared 对象被 this.m_slice_callback 持有
+                out = Parser(LiteralStringPsr(tok.to_std_string()));
+            };
+            return *this;
+        }
 
         // CharRangePsr helper function
         Parser& operator()(const std::pair<char, char>& range)
@@ -761,9 +779,7 @@ namespace _LEXPARSER_SHELL
         bool Anonymous() const { return Name().empty(); }
         const std::string& Name() const { return m_name; }
         Parser& SetName(const std::string& name) {
-            if (std::get_if<PreDeclPsr>(&m_psr)) {
-                Unwrap().m_name = name;
-            } 
+            if (std::get_if<PreDeclPsr>(&m_psr)) { Unwrap().m_name = name; } 
             m_name = name; 
             return *this; 
         }
@@ -778,8 +794,11 @@ namespace _LEXPARSER_SHELL
                     return (ret = ScanState::Fatal);
                 }
                 else if constexpr (std::is_same<P, LambdaPsr>::value) {
-                    assert(((void)0, false));
-                    err = "LambdaPsr: ...";
+                    if (_psr.m_arg) {
+                        return (ret = _psr(*_psr.m_arg)(script, len, offset, ctx, err)); // apply
+                    }
+                    assert(((void)0, false)); // 没有参数可以传递给 lambda
+                    err =  (m_name.empty() ? m_name :  "`" + m_name + "` ") + "LambdaPsr: expect a parameter, but here a null is provided."; 
                     return (ret = ScanState::Fatal);
                 }
                 else if constexpr (std::is_same<P, PreDeclPsr>::value) {
@@ -791,8 +810,12 @@ namespace _LEXPARSER_SHELL
                         auto guard = ctx.WhiteSpacesScopeGuard(); (void)guard; // 白字符不能递归下去
                         ctx.IgnoreWhiteSpaces()(script, len, offset, ctx, err);
                     }
-                    return (ret = _psr(script, len, offset, ctx, err));
-
+                    std::size_t oldoffset = offset;
+                    ret = _psr(script, len, offset, ctx, err);
+                    if (m_slice_callback && ScanState::OK == ret) {
+                        m_slice_callback(core::StrRef{script + oldoffset, script + offset}); // @TODO 暂时不考虑脚本分段情况
+                    }
+                    return ret;
                 }
             }, m_psr);
 
@@ -823,16 +846,15 @@ namespace _LEXPARSER_SHELL
         // 吃掉一批连续的白字符，总是成功
         static ScanState EatWss(const char* script, std::size_t len, std::size_t& offset, ...) noexcept {
             while (offset < len) {
-                if (ScanState::OK != EatWs(script, len, offset)) {
-                    break;
-                }
+                if (ScanState::OK != EatWs(script, len, offset)) { break; }
             }
             return ScanState::OK;
         }
-
+    
     public:
-        VariantParser  m_psr;
-        std::string    m_name;
+        VariantParser                     m_psr;
+        std::string                       m_name;
+        std::function<void(core::StrRef)> m_slice_callback;
     }; // struct Parser
 
     namespace details {

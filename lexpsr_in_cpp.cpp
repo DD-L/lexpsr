@@ -383,41 +383,54 @@ void test_xml3()
                     <d2> d2_v </d2>
                 </c1>
                 <c2> c2_v </c2>
-             </cxxx>
+             </!cxxx>
          </x1>
     )";
 
     using namespace lexpsr_shell;
 
     /// <summary>
-    /// xml 文法  !!!!!!!!!!!!! 未完成 ！！！！！！！！！！！！！！！！！
+    /// xml 文法 
     /// </summary>
     psr(_) = wss; // 白字符
     psr(ident) = range('0', '9')('a', 'z')('A', 'Z')('_', '_')[at_least_1];
     psr(leaf) = ident;
 
-    decl_psr(node) = $curry([&_, &leaf, &node](Parser ident) -> Parser {
-        psr(values) = (leaf | node.apply(ident))[at_least_1];
-        psr(node_name);
-        return (
-            _, "<"_psr, _, 
-            ident // .as(node_name)   // <---- 这里未完成
-            , _, ">"_psr, _, values, _, "<"_psr, _, "/"_psr, _, 
+    decl_psr(node) = $curry([&_, &leaf, node](Parser ident) {
+
+        decl_psr(node_name);
+
+        psr(head) = ("<"_psr, _,
+            ident.slice_as_str_psr(node_name)
+            , _, ">"_psr);
+
+        psr(tail) = ("<"_psr, _, "/"_psr, _,
             (node_name | fatal_if(nop, "The start and end of an xml node do not match.")),
-            _, ">"_psr, _
-        );
+            _, ">"_psr);
+
+        psr(values) = (leaf | node.with_args(ident))[at_least_1];
+
+        return (_, head, _, values,  _, tail, _);
     });
 
+    psr(root) = node.with_args(ident);
     
     ///////////
     std::size_t offset = 0;
     core::Context ctx;
     std::string err;
-    ScanState ss = node.apply(ident).ScanScript(script.data(), script.size(), offset, ctx, err);
+    ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
     if (ScanState::OK != ss) {
         std::cout << err << std::endl;
     }
-    assert(ScanState::OK == ss && script.size() == offset);
+    else {
+        assert(ScanState::OK == ss && script.size() == offset);
+        auto res = InvokeActions(ctx, err); 
+        if (!res.first) {
+            std::cerr << err << std::endl;
+        }
+    }
+
     std::cout << "-----------" << std::endl;
 }
 
@@ -429,21 +442,7 @@ int main()
     test_shell_unordered();
     test_xml1();
     test_xml2();
-    //test_xml3(); // 未完成，暂时注释掉
-
-    //auto node = []<class V, class N>(V value, N next) {
-    //    return [=](bool which) {
-    //        return which ? std::variant<V, N>(value) : std::variant<V, N>(next);
-    //    };
-    //};
-    //
-    //auto lst = node(1, node(2, node(3, nullptr)));
-    //
-    // auto value = std::get<0>(lst(true));
-    // std::cout << value << std::endl;
-    // auto next_node = std::get<1>(lst(false));
-    // auto next_value = std::get<0>(next_node(true));
-    // std::cout << next_value << std::endl;
+    test_xml3(); 
 
     return 0;
 }
