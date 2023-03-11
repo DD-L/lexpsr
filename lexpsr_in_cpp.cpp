@@ -396,20 +396,16 @@ void test_xml3()
     psr(ident) = range('0', '9')('a', 'z')('A', 'Z')('_', '_')[at_least_1];
     psr(leaf) = ident;
 
-    decl_psr(node) = $curry([&_, &leaf, node](Parser ident) {
-
+    decl_psr(node) = $curry([&_, &leaf, node](const Parser& ident) {
+    
         decl_psr(node_name);
-
-        psr(head) = ("<"_psr, _,
-            ident.slice_as_str_psr(node_name)
-            , _, ">"_psr);
-
+        psr(head) = ("<"_psr, _, ident.slice_as_str_psr(node_name), _, ">"_psr);
+    
         psr(tail) = ("<"_psr, _, "/"_psr, _,
             (node_name | fatal_if(nop, "The start and end of an xml node do not match.")),
             _, ">"_psr);
-
+    
         psr(values) = (leaf | node.with_args(ident))[at_least_1];
-
         return (_, head, _, values,  _, tail, _);
     });
 
@@ -434,6 +430,68 @@ void test_xml3()
     std::cout << "-----------" << std::endl;
 }
 
+void test_xml4()
+{ // 可以利用 lambda 演算系统，在 ScanScript() 阶段就能发现错误， 相对于 test_xml3，它将 “</name>” 放在一起做判定
+    const std::string script = R"(
+         <x1>
+             <a>a_v</a>
+             <b> b_v < /b>
+             <c>
+                <c1> 
+                    <d1> d1_v </d1>
+                    <d2> d2_v </d2>
+                </c1>
+                <c2> c2_v </c2>
+             </cxxx>
+         </x1>
+    )";
+
+    using namespace lexpsr_shell;
+
+    /// <summary>
+    /// xml 文法 
+    /// </summary>
+    psr(_) = wss; // 白字符
+    psr(ident) = range('0', '9')('a', 'z')('A', 'Z')('_', '_')[at_least_1];
+    psr(leaf) = ident;
+
+    decl_psr(node) = $curry([&_, &leaf, node](const Parser& ident) {
+
+        decl_psr(tail);
+        psr(name_with_cb) = ident.with_slice_callback([tail, &_](core::StrRef slice) mutable {
+            psr(name) = slice.to_std_string();
+            assert(std::get_if<PreDeclPsr>(&tail.m_psr));
+            tail = ("<"_psr, _, "/"_psr, _, name, _, ">"_psr);
+        });
+
+        psr(head) = ("<"_psr, _, name_with_cb, _, ">"_psr);
+        psr(values) = (leaf | node.with_args(ident))[at_least_1];
+        psr(assert_tail) = tail | fatal_if(nop, "The start and end of an xml node do not match.");
+
+        return (_, head, _, values, _, assert_tail, _);
+    });
+
+    psr(root) = node.with_args(ident);
+
+    ///////////
+    std::size_t offset = 0;
+    core::Context ctx;
+    std::string err;
+    ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
+    if (ScanState::OK != ss) {
+        std::cout << err << std::endl;
+    }
+    else {
+        assert(ScanState::OK == ss && script.size() == offset);
+        auto res = InvokeActions(ctx, err);
+        if (!res.first) {
+            std::cerr << err << std::endl;
+        }
+    }
+
+    std::cout << "-----------" << std::endl;
+}
+
 int main()
 {
     test_core();
@@ -442,7 +500,8 @@ int main()
     test_shell_unordered();
     test_xml1();
     test_xml2();
-    test_xml3(); 
+    test_xml3();
+    test_xml4();
 
     return 0;
 }

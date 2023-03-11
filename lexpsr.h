@@ -714,6 +714,7 @@ namespace _LEXPARSER_SHELL
             if (this != &expr) {
                 assert(!m_name.empty());
                 Unwrap() = expr.m_psr;
+                Unwrap().m_slice_callback = expr.m_slice_callback;
             }
         }
 
@@ -721,6 +722,7 @@ namespace _LEXPARSER_SHELL
             if (this != &expr) {
                 assert(!m_name.empty());
                 Unwrap() = std::move(expr.m_psr);
+                Unwrap().m_slice_callback = std::move(expr.m_slice_callback);
             }
         }
 
@@ -740,12 +742,18 @@ namespace _LEXPARSER_SHELL
         }
         const Parser& apply() const { return *this; }
 
-        Parser& slice_as_str_psr(Parser& out) {
-            m_slice_callback = [out](core::StrRef tok) mutable {
-                assert(std::get_if<PreDeclPsr>(&out.m_psr)); // out 中的 shared 对象被 this.m_slice_callback 持有
+        Parser slice_as_str_psr(Parser& out) const {
+            assert(std::get_if<PreDeclPsr>(&out.m_psr)); // out 中的 shared 对象被 this.m_slice_callback 持有
+            return with_slice_callback([out](core::StrRef tok) mutable {
                 out = Parser(LiteralStringPsr(tok.to_std_string()));
-            };
-            return *this;
+            });
+        }
+
+        template <class SliceHandler>
+        Parser with_slice_callback(SliceHandler&& h) const {
+            auto copy(*this);
+            copy.m_slice_callback = std::forward<SliceHandler>(h);
+            return copy;
         }
 
         // CharRangePsr helper function
