@@ -94,6 +94,15 @@ namespace _LEXPARSER_CORE {
         const ActionScanner* m_action_scanner = nullptr;
     };
 
+    struct CrimeScenes {
+        void Reset() noexcept { m_db.clear(); }
+        void OnRecord(std::size_t old, std::size_t curr) {
+            m_db.emplace_back(old, curr);
+        }
+
+        std::vector<std::pair<std::size_t, std::size_t>> m_db; // { old, curr }
+    };
+
     class Context {
     public:
         union {
@@ -102,7 +111,7 @@ namespace _LEXPARSER_CORE {
         };
 
         std::vector<ActionMaterial>  m_lazy_action;
-
+        CrimeScenes                  m_crime_scenes;
     private:
         friend struct _LEXPARSER_SHELL::Parser;
         ScanFunc                     m_white_spaces;
@@ -111,6 +120,7 @@ namespace _LEXPARSER_CORE {
     public:
         Context& Reset() {
             ResetLazyAction();
+            m_crime_scenes.Reset();
             ClearWhiteSpaces();
             return *this;
         }
@@ -129,6 +139,13 @@ namespace _LEXPARSER_CORE {
             m_lazy_action.clear();
             return *this;
         }
+
+        void GoBackToWithRecording(std::size_t& offset, std::size_t oldOffset) {
+            m_crime_scenes.OnRecord(oldOffset, offset);
+            GoBackTo(offset, oldOffset);
+        }
+
+        void GoBackTo(std::size_t& offset, std::size_t oldOffset) noexcept { offset = oldOffset; }
 
     private:
         const ScanFunc& IgnoreWhiteSpaces() const { return m_white_spaces; }
@@ -163,7 +180,7 @@ namespace _LEXPARSER_CORE {
             for (const ScanFunc& sf : m_member) {
                 ScanState ss = sf(data, len, offset, ctx, err);
                 if (ScanState::Dismatch == ss) {
-                    offset = oldOffset;
+                    ctx.GoBackToWithRecording(offset, oldOffset);
                     return ScanState::Dismatch;
                 }
 
@@ -210,7 +227,7 @@ namespace _LEXPARSER_CORE {
                     return ss;
                 }
 
-                offset = oldOffset;
+                ctx.GoBackToWithRecording(offset, oldOffset);
             }
 
             assert(oldOffset == offset);
@@ -239,7 +256,7 @@ namespace _LEXPARSER_CORE {
             for (std::size_t i = 0; i < m_min; ++i) { // 必要条件： 满足最小循环次数
                 ScanState ss = m_member(data, len, offset, ctx, err);
                 if (ScanState::Dismatch == ss) {
-                    offset = oldOffset;
+                    ctx.GoBackToWithRecording(offset, oldOffset);
                     return ScanState::Dismatch;
                 }
 
@@ -253,7 +270,7 @@ namespace _LEXPARSER_CORE {
                 oldOffset = offset;
                 ScanState ss = m_member(data, len, offset, ctx, err);
                 if (ScanState::Dismatch == ss) {
-                    offset = oldOffset;
+                    ctx.GoBackTo(offset, oldOffset);
                     break;
                 }
                 else if (ScanState::Fatal == ss) {// @TODO 致命错误，也当失配处理？
@@ -303,7 +320,7 @@ namespace _LEXPARSER_CORE {
                 case ScanState::Dismatch: ss = ScanState::OK;        break;
                 default:                  ss = ScanState::Fatal;     break;
                 }
-                offset = old_offset; // 不产生任何副作用
+                ctx.GoBackTo(offset, old_offset); // 不产生任何副作用
                 ctx.m_lazy_action.resize(old_lazy_cnt);
                 return ss;
             }
@@ -344,7 +361,7 @@ namespace _LEXPARSER_CORE {
                 ScanState ss = m_scanner(data, len, offset, ctx, err);
                 if (ScanState::OK == ss) {
                     err += m_err_msg;
-                    offset = old_offset;
+                    ctx.GoBackToWithRecording(offset, old_offset);
                     return ScanState::Fatal;
                 }
                 return ss;
