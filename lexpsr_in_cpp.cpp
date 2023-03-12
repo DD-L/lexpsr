@@ -151,23 +151,17 @@ void test_shell1()
     { // eat wss and comment case:
         const std::string script = R"(
         #werwerw
-        # comment 。d
+        # comment 。。。d 这里是中文。。
                  23423 + 1032 = 24455 # comment
         # comment
         )";
 
-        // 中文 BUG
-        //const std::string script = R"(
-        //#werwerw
-        //# comment 。。。d
-        //         23423 + 1032 = 24455 # comment
-        //# comment
-        //)";
+        ctx.Reset(); // 清理前一个 ctx 的垃圾
+        offset = 0;
 
         psr(comment) = "#"_psr - negative_set("\n")[any_cnt] - "\n"_psr;
         ctx.SetWhiteSpaces((ws | comment)[any_cnt]);
 
-        ctx.ResetLazyAction(); // 清理前一个 ctx 的事件垃圾
         core::ScanState res = root.ScanScript(script.data(), script.size(), offset, ctx, err);
         assert(core::ScanState::OK == res);
         std::pair<bool, std::size_t> ac_res = InvokeActions(ctx, err);
@@ -409,7 +403,7 @@ void test_xml3()
         return (_, head, _, values,  _, tail, _);
     });
 
-    psr(root) = node.with_args(ident);
+    psr(root) = (ignore_utf8bom, node.with_args(ident));
     
     ///////////
     std::size_t offset = 0;
