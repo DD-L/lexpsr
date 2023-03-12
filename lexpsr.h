@@ -11,6 +11,7 @@
 #include <cstring>
 #include <algorithm>
 #include <type_traits>
+#include <iterator>
 #include <variant>
 
 #ifndef _LEXPARSER_CORE
@@ -734,7 +735,7 @@ namespace _LEXPARSER_SHELL
             assert(std::get_if<LambdaPsr>(&(unwrap().m_psr)));
             LambdaPsr::Args args{ std::make_shared<Parser>(arg), std::make_shared<Parser>(std::forward<Psrs>(rest))... };
             auto copy = std::get<LambdaPsr>(unwrap().m_psr);
-            copy.m_args.insert(copy.m_args.end(), args.begin(), args.end());
+            std::move(args.begin(), args.end(), std::back_inserter(copy.m_args));
             return Parser(copy, m_name);
         }
         const Parser& with_args() const { return *this; }
