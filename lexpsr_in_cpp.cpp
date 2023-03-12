@@ -492,6 +492,37 @@ void test_xml4()
     std::cout << "-----------" << std::endl;
 }
 
+void test_with_args()
+{
+
+    using namespace lexpsr_shell;
+    psr(root) = $curry([](Parser p1, Parser p2, Parser p3) {
+        psr(space) = " ";
+        return (p1, space, p2, space, p3);
+    });
+    psr(p1) = "abc";
+    psr(p2) = "def";
+    psr(p3) = "g";
+
+    std::size_t offset = 0;
+    core::Context ctx;
+    std::string err;
+
+    // case 1
+    std::string script = "abc def g";
+    ScanState ss = root.with_args(p1, p2, p3).ScanScript(script.data(), script.size(), offset, ctx, err);
+    assert(ScanState::OK == ss && script.size() == offset); (void)ss;
+
+    // case 2
+    script = "abc x g";
+    ss = root.with_args(p1, p2, p3).ScanScript(script.data(), script.size(), offset, ctx, err);
+    assert(ScanState::OK != ss && script.size() != offset); (void)ss;
+    if (ScanState::OK != ss) {
+        std::cerr << err << std::endl;
+    }
+    std::cout << "-----------" << std::endl;
+}
+
 int main()
 {
     test_core();
@@ -502,6 +533,7 @@ int main()
     test_xml2();
     test_xml3();
     test_xml4();
+    test_with_args();
 
     return 0;
 }

@@ -669,8 +669,8 @@ namespace _LEXPARSER_SHELL
     using PreDeclPsr = std::shared_ptr<Parser>;
 
     struct Parser {
-        typedef std::variant<
-            UnbindPsr, StrPsr, CharSetPsr, SequencePsr, BranchPsr, LoopPsr, ActionPsr, NextNotPsr, FatalIfPsr, Scanner, NopPsr, LambdaPsr,
+        typedef std::variant<UnbindPsr,
+            StrPsr, CharSetPsr, SequencePsr, BranchPsr, LoopPsr, ActionPsr, NextNotPsr, FatalIfPsr, Scanner, NopPsr, LambdaPsr,
             PreDeclPsr
         > VariantParser;
 
@@ -732,7 +732,7 @@ namespace _LEXPARSER_SHELL
         Parser with_args(const Parser& arg, Psrs&&... rest) const { // 使得 LambdaPsr 携带实参
             assert(std::get_if<LambdaPsr>(&(unwrap().m_psr)));
             auto copy = std::get<LambdaPsr>(unwrap().m_psr);
-            copy.m_args = std::vector { std::make_shared<Parser>(arg), std::make_shared<Psrs>(rest)... };
+            copy.m_args = std::vector { std::make_shared<Parser>(arg), std::make_shared<Parser>(std::forward<Psrs>(rest))... };
             return Parser(copy, m_name);
         }
         const Parser& with_args() const { return *this; }
