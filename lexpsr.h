@@ -647,7 +647,7 @@ namespace _LEXPARSER_SHELL
     } // namespace free function
 
     struct UnbindPsr {};
-    using LiteralStringPsr = core::Token;
+    using StrPsr           = core::Token;
     using SequencePsr      = core::Seq;
     using BranchPsr        = core::Branch;
     using LoopPsr          = core::Loop;
@@ -668,7 +668,7 @@ namespace _LEXPARSER_SHELL
 
     struct Parser {
         typedef std::variant<
-            UnbindPsr, LiteralStringPsr, CharSetPsr, SequencePsr, BranchPsr, LoopPsr, ActionPsr, NextNotPsr, FatalIfPsr, Scanner, NopPsr, LambdaPsr,
+            UnbindPsr, StrPsr, CharSetPsr, SequencePsr, BranchPsr, LoopPsr, ActionPsr, NextNotPsr, FatalIfPsr, Scanner, NopPsr, LambdaPsr,
             PreDeclPsr
         > VariantParser;
 
@@ -695,7 +695,7 @@ namespace _LEXPARSER_SHELL
 
     public:
         void operator=(const std::string& expr) noexcept {
-            Unwrap() = LiteralStringPsr{ expr };
+            Unwrap() = StrPsr{ expr };
         }
 
         template <std::size_t N>
@@ -745,7 +745,7 @@ namespace _LEXPARSER_SHELL
         Parser slice_as_str_psr(Parser& out) const {
             assert(std::get_if<PreDeclPsr>(&out.m_psr)); // out 中的 shared 对象被 this.m_slice_callback 持有
             return with_slice_callback([out](core::StrRef tok) mutable {
-                out = Parser(LiteralStringPsr(tok.to_std_string()));
+                out = Parser(StrPsr{ tok.to_std_string() });
             });
         }
 
@@ -904,7 +904,7 @@ namespace _LEXPARSER_SHELL
 
         // <<= 与 = 优先级相同，但是他们都是右结合
         [[maybe_unused]] Parser operator<<=(const std::string& str, const Action& action) {
-            return Parser(ActionPsr{ Parser(LiteralStringPsr{str}), action });
+            return Parser(ActionPsr{ Parser(StrPsr{str}), action });
         }
 
         template <class T>
@@ -921,7 +921,7 @@ namespace _LEXPARSER_SHELL
         }
 
         [[maybe_unused]] Parser operator"" _psr(const char* str, std::size_t) {
-            return Parser(LiteralStringPsr{ str });
+            return Parser(StrPsr{ str });
         }
 
         // 字符集
@@ -983,13 +983,13 @@ namespace _LEXPARSER_SHELL
             }
         }
 
-        [[maybe_unused]] const Parser  epsilon = Parser(NopPsr(), "epsilon");      // `epsilon` 永远成功，等价于 nop ???
+        [[maybe_unused]] const Parser  epsilon = Parser(NopPsr(), "epsilon");       // `epsilon` 永远成功，等价于 nop ???
         [[maybe_unused]] const Parser& nop     = epsilon;
-        [[maybe_unused]] const Parser _false   = next_not(nop).SetName("_false");  // `_false`，永远失配
-        [[maybe_unused]] const Parser ws(Scanner(Parser::EatWs), "ws");            // ws  吃掉一个白字符，失败返回失配
-        [[maybe_unused]] const Parser wss(Scanner(Parser::EatWss), "wss");         // wss 吃掉一批连续的白字符，永远成功
-        [[maybe_unused]] const Parser utf8bom(LiteralStringPsr("\xEF\xBB\xBF"), "utf8bom"); // UTF-8 编码的 BOM 头，通常这样使用：(utf8bom | epsilon), 或 ignore_utf8bom
-        [[maybe_unused]] const Parser ignore_utf8bom(utf8bom | epsilon);                    // 可表达 UTF-8 BOM 头允许被忽略的 psr
+        [[maybe_unused]] const Parser _false   = next_not(nop).SetName("_false");   // `_false`，永远失配
+        [[maybe_unused]] const Parser ws(Scanner(Parser::EatWs), "ws");             // ws  吃掉一个白字符，失败返回失配
+        [[maybe_unused]] const Parser wss(Scanner(Parser::EatWss), "wss");          // wss 吃掉一批连续的白字符，永远成功
+        [[maybe_unused]] const Parser utf8bom(StrPsr{ "\xEF\xBB\xBF" }, "utf8bom"); // UTF-8 编码的 BOM 头，通常这样使用：(utf8bom | epsilon), 或 ignore_utf8bom
+        [[maybe_unused]] const Parser ignore_utf8bom(utf8bom | epsilon);            // 可表达 UTF-8 BOM 头允许被忽略的 psr
 
         std::pair<bool, std::size_t> InvokeActions(core::Context& ctx, std::string& err) {
             std::size_t success_cnt = 0;
