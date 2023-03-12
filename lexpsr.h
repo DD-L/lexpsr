@@ -695,41 +695,41 @@ namespace _LEXPARSER_SHELL
 
     public:
         void operator=(const std::string& expr) noexcept {
-            Unwrap() = StrPsr{ expr };
+            unwrap() = StrPsr{ expr };
         }
 
         template <std::size_t N>
         void operator=(const char(&arr)[N]) noexcept {
-            Unwrap() = std::string(arr);
+            unwrap() = std::string(arr);
         }
 
         template <class T,
             class = typename std::enable_if<!std::is_same<UnbindPsr, T>::value>::type,
             class = std::void_t<decltype(std::declval<VariantParser>() = std::declval<T>())>>
         void operator=(const T& expr) noexcept {
-            Unwrap().m_psr = expr;
+            unwrap().m_psr = expr;
         }
 
         void operator=(const Parser& expr) noexcept {
             if (this != &expr) {
                 assert(!m_name.empty());
-                Unwrap() = expr.m_psr;
-                Unwrap().m_slice_callback = expr.m_slice_callback;
+                unwrap() = expr.m_psr;
+                unwrap().m_slice_callback = expr.m_slice_callback;
             }
         }
 
         void operator=(Parser&& expr) noexcept {
             if (this != &expr) {
                 assert(!m_name.empty());
-                Unwrap() = std::move(expr.m_psr);
-                Unwrap().m_slice_callback = std::move(expr.m_slice_callback);
+                unwrap() = std::move(expr.m_psr);
+                unwrap().m_slice_callback = std::move(expr.m_slice_callback);
             }
         }
 
         template <class... Psrs>
         Parser with_args(const Parser& arg, Psrs&&... rest) const {
-            assert(std::get_if<LambdaPsr>(&(Unwrap().m_psr)));
-            auto copy = std::get<LambdaPsr>(Unwrap().m_psr);  // <-- @TODO 难题这里如何实现反科里化？将 rest 用上
+            assert(std::get_if<LambdaPsr>(&(unwrap().m_psr)));
+            auto copy = std::get<LambdaPsr>(unwrap().m_psr);  // <-- @TODO 难题这里如何实现反科里化？将 rest 用上
             copy.m_arg = std::make_shared<Parser>(arg);
             return Parser(copy, m_name); //.with_args(std::forward<Psrs>(rest)...);
         }
@@ -737,8 +737,8 @@ namespace _LEXPARSER_SHELL
 
         template <class... Psrs>
         Parser apply(const Parser& arg, Psrs&&... rest) const {
-            assert(std::get_if<LambdaPsr>(&(Unwrap().m_psr)));
-            return std::get<LambdaPsr>(Unwrap().m_psr)(arg).apply(std::forward<Psrs>(rest)...);
+            assert(std::get_if<LambdaPsr>(&(unwrap().m_psr)));
+            return std::get<LambdaPsr>(unwrap().m_psr)(arg).apply(std::forward<Psrs>(rest)...);
         }
         const Parser& apply() const { return *this; }
 
@@ -784,10 +784,10 @@ namespace _LEXPARSER_SHELL
         Parser operator[](details::any_cnt_t) const { return (*this)[any_cnt()]; }
         Parser operator[](details::at_least_1_t) const { return (*this)[at_least_1()]; }
 
-        bool Anonymous() const { return Name().empty(); }
-        const std::string& Name() const { return m_name; }
-        Parser& SetName(const std::string& name) {
-            if (std::get_if<PreDeclPsr>(&m_psr)) { Unwrap().m_name = name; } 
+        bool anonymous() const { return name().empty(); }
+        const std::string& name() const { return m_name; }
+        Parser& set_name(const std::string& name) {
+            if (std::get_if<PreDeclPsr>(&m_psr)) { unwrap().m_name = name; }
             m_name = name; 
             return *this; 
         }
@@ -830,7 +830,7 @@ namespace _LEXPARSER_SHELL
             return ret;
         }
 
-        Parser& Unwrap() {
+        Parser& unwrap() {
             if (std::get_if<PreDeclPsr>(&m_psr)) {
                 auto&& inner = std::get<PreDeclPsr>(m_psr);
                 assert(nullptr != inner);
@@ -839,7 +839,7 @@ namespace _LEXPARSER_SHELL
             return *this;
         }
 
-        const Parser& Unwrap() const { return const_cast<Parser*>(this)->Unwrap(); };
+        const Parser& unwrap() const { return const_cast<Parser*>(this)->unwrap(); };
 
     public:
         // 吃掉一个白字符
@@ -868,7 +868,7 @@ namespace _LEXPARSER_SHELL
     namespace details {
         template <class T>
         static inline Parser _MakeSeqOrBranchPair(const Parser& a, const Parser& b) {
-            if (a.Anonymous()) { // 左结合的连接符，-，会导致 a 有可能也是个 SequenceExpr， 如果 a 是匿名的需展开
+            if (a.anonymous()) { // 左结合的连接符，-，会导致 a 有可能也是个 SequenceExpr， 如果 a 是匿名的需展开
                 const T* _a = std::get_if<T>(&a.m_psr);
                 if (nullptr != _a) {
                     T copy = *_a; // copy 一份
@@ -985,7 +985,7 @@ namespace _LEXPARSER_SHELL
 
         [[maybe_unused]] const Parser  epsilon = Parser(NopPsr(), "epsilon");       // `epsilon` 永远成功，等价于 nop ???
         [[maybe_unused]] const Parser& nop     = epsilon;
-        [[maybe_unused]] const Parser _false   = next_not(nop).SetName("_false");   // `_false`，永远失配
+        [[maybe_unused]] const Parser _false   = next_not(nop).set_name("_false");  // `_false`，永远失配
         [[maybe_unused]] const Parser ws(Scanner(Parser::EatWs), "ws");             // ws  吃掉一个白字符，失败返回失配
         [[maybe_unused]] const Parser wss(Scanner(Parser::EatWss), "wss");          // wss 吃掉一批连续的白字符，永远成功
         [[maybe_unused]] const Parser utf8bom(StrPsr{ "\xEF\xBB\xBF" }, "utf8bom"); // UTF-8 编码的 BOM 头，通常这样使用：(utf8bom | epsilon), 或 ignore_utf8bom
