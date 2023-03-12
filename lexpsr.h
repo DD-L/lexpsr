@@ -660,7 +660,7 @@ namespace _LEXPARSER_SHELL
     struct Parser;
     struct LambdaPsr : std::function<Parser(const Parser&)> { // currying. for example, (Parser -> Parser) -> Parser == Parser -> (Parser -> Parser).
         using std::function<Parser(const Parser&)>::function;
-        std::shared_ptr<Parser> m_arg;  // 携带的实参
+        std::vector<std::shared_ptr<Parser>> m_args; // 携带的实参，从该函数执行反科里化
     };
 
     struct IntPsr {}; // 表示数字的 psr , 兼容丘奇数与立即数 @TODO
@@ -727,11 +727,11 @@ namespace _LEXPARSER_SHELL
         }
 
         template <class... Psrs>
-        Parser with_args(const Parser& arg, Psrs&&... rest) const {
+        Parser with_args(const Parser& arg, Psrs&&... rest) const { // 使得 LambdaPsr 携带实参
             assert(std::get_if<LambdaPsr>(&(unwrap().m_psr)));
-            auto copy = std::get<LambdaPsr>(unwrap().m_psr);  // <-- @TODO 难题这里如何实现反科里化？将 rest 用上
-            copy.m_arg = std::make_shared<Parser>(arg);
-            return Parser(copy, m_name); //.with_args(std::forward<Psrs>(rest)...);
+            auto copy = std::get<LambdaPsr>(unwrap().m_psr);
+            copy.m_args = std::vector { std::make_shared<Parser>(arg), std::make_shared<Psrs>(rest)... };
+            return Parser(copy, m_name);
         }
         const Parser& with_args() const { return *this; }
 
@@ -802,11 +802,16 @@ namespace _LEXPARSER_SHELL
                     return (ret = ScanState::Fatal);
                 }
                 else if constexpr (std::is_same<P, LambdaPsr>::value) {
-                    if (_psr.m_arg) {
-                        return (ret = _psr(*_psr.m_arg)(script, len, offset, ctx, err)); // apply
+                    if (!_psr.m_args.empty()) { // 非空意味着当前 Lambda 携带实参，需执行 apply
+                        Parser psr_fn = *this;  // copy
+                        for (auto&& arg : _psr.m_args) {
+                            assert(!!arg);
+                            psr_fn = psr_fn.apply(*arg); // psr_fn.set_name(); 这里可以添加 psr 名字信息，以方便调试，比如 func_$0 func_$1 ...
+                        }
+                        return (ret = psr_fn(script, len, offset, ctx, err));
                     }
                     err =  (m_name.empty() ? m_name :  "`" + m_name + "` ") + "LambdaPsr: expect a parameter, but here a null is provided.";
-                    assert(((void)0, false)); // 没有参数可以传递给 lambda
+                    assert(((void)0, false)); // 没有参数可以传递给该 lambda
                     return (ret = ScanState::Fatal);
                 }
                 else if constexpr (std::is_same<P, PreDeclPsr>::value) {
