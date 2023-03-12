@@ -510,11 +510,30 @@ void test_with_args()
 
     // case 1
     std::string script = "abc def g";
+    ctx.Reset();
+    offset = 0;
     ScanState ss = root.with_args(p1, p2, p3).ScanScript(script.data(), script.size(), offset, ctx, err);
     assert(ScanState::OK == ss && script.size() == offset); (void)ss;
 
     // case 2
+    script = "abc def g";
+    ctx.Reset();
+    offset = 0;
+    ss = root.with_args(p1, p2).with_args(p3).ScanScript(script.data(), script.size(), offset, ctx, err);
+    assert(ScanState::OK == ss && script.size() == offset); (void)ss;
+
+    // case 3
+    script = "abc def xyz";
+    psr(p4) = "xyz";
+    ctx.Reset();
+    offset = 0;
+    ss = root.with_args(p1).with_args(p2).with_args(p4).ScanScript(script.data(), script.size(), offset, ctx, err);
+    assert(ScanState::OK == ss && script.size() == offset); (void)ss;
+
+    // case 4
     script = "abc x g";
+    ctx.Reset();
+    offset = 0;
     ss = root.with_args(p1, p2, p3).ScanScript(script.data(), script.size(), offset, ctx, err);
     assert(ScanState::OK != ss && script.size() != offset); (void)ss;
     if (ScanState::OK != ss) {

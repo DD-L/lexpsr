@@ -661,8 +661,9 @@ namespace _LEXPARSER_SHELL
 
     struct Parser;
     struct LambdaPsr : std::function<Parser(const Parser&)> { // currying. for example, (Parser -> Parser) -> Parser == Parser -> (Parser -> Parser).
+        typedef std::vector<std::shared_ptr<Parser>> Args;
         using std::function<Parser(const Parser&)>::function;
-        std::vector<std::shared_ptr<Parser>> m_args; // 携带的实参，从该函数执行反科里化
+        Args m_args; // 携带的实参，从该函数递归执行 apply
     };
 
     struct IntPsr {}; // 表示数字的 psr , 兼容丘奇数与立即数 @TODO
@@ -731,8 +732,9 @@ namespace _LEXPARSER_SHELL
         template <class... Psrs>
         Parser with_args(const Parser& arg, Psrs&&... rest) const { // 使得 LambdaPsr 携带实参
             assert(std::get_if<LambdaPsr>(&(unwrap().m_psr)));
+            LambdaPsr::Args args{ std::make_shared<Parser>(arg), std::make_shared<Parser>(std::forward<Psrs>(rest))... };
             auto copy = std::get<LambdaPsr>(unwrap().m_psr);
-            copy.m_args = std::vector { std::make_shared<Parser>(arg), std::make_shared<Parser>(std::forward<Psrs>(rest))... };
+            copy.m_args.insert(copy.m_args.end(), args.begin(), args.end());
             return Parser(copy, m_name);
         }
         const Parser& with_args() const { return *this; }
