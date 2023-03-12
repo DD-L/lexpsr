@@ -549,6 +549,8 @@ namespace _LEXPARSER_CORE {
         Token(Token&&) = default;
         Token& operator=(const Token&) = default;
         Token& operator=(Token&&) = default;
+        // 作为 lexpsr_shell::StrPsr 时，需要拿到它携带的数据 (Value)
+        const std::string& Value() const { return m_tok; }
 
         ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context&, std::string&) const noexcept {
             if (m_tok.size() + offset > len) {
