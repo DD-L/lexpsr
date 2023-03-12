@@ -797,16 +797,16 @@ namespace _LEXPARSER_SHELL
             std::visit([&](auto&& _psr) -> ScanState {
                 typedef typename std::decay<decltype(_psr)>::type P;
                 if constexpr (std::is_same<P, UnbindPsr>::value) {
-                    assert(((void)0, false));
                     err = "UnbindPsr: ...";
+                    assert(((void)0, false));
                     return (ret = ScanState::Fatal);
                 }
                 else if constexpr (std::is_same<P, LambdaPsr>::value) {
                     if (_psr.m_arg) {
                         return (ret = _psr(*_psr.m_arg)(script, len, offset, ctx, err)); // apply
                     }
+                    err =  (m_name.empty() ? m_name :  "`" + m_name + "` ") + "LambdaPsr: expect a parameter, but here a null is provided.";
                     assert(((void)0, false)); // 没有参数可以传递给 lambda
-                    err =  (m_name.empty() ? m_name :  "`" + m_name + "` ") + "LambdaPsr: expect a parameter, but here a null is provided."; 
                     return (ret = ScanState::Fatal);
                 }
                 else if constexpr (std::is_same<P, PreDeclPsr>::value) {
