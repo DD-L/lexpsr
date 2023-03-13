@@ -536,6 +536,120 @@ void test_with_args()
     std::cout << "-----------" << std::endl;
 }
 
+void test_friendly_error()
+{
+    using namespace lexpsr_shell;
+    core::Context ctx;
+    std::size_t offset = 0;
+    std::string err;
+    std::string script;
+
+    auto reset = [&ctx, &offset]() {
+        ctx.Reset();
+        ctx.SetWhiteSpaces(wss);
+        offset = 0;
+    };
+
+    // 定义一种语言：
+    // "a: ident -> ident;"
+    // "b: ident -> 0;"
+    // "c: 0 -> ident;"
+    // "d: (ident, ..) -> 0;"
+    // "e: 0 -> (ident, ..);"
+    // "f: (ident, ..) -> ident;"
+    // "g: ident -> (ident, ...);"
+    // "h: (ident, ...) -> (ident, ...);"
+    // 其中 “a:”、“b:”... 可以省略
+
+    // [a-zA-Z_][a-zA-Z0-9_]*
+    psr(ident_first) = range('a', 'z')('A', 'Z')('_', '_');
+    psr(ident) = (ident_first, ident_first('0', '9')[any_cnt]);
+    psr(identlist) = ("("_psr, ident, (","_psr, ident)[any_cnt], ")"_psr);
+
+    // 注意：这里这样表达不能处理 "abc->dd;" 这样的语言，因为 a 会被 alpha 成功吃掉，进而在第二个字节期望':'失败
+    // 写成 alpha[at_most_1] 也不行
+    //auto head = [](const Parser& alpha) {
+    //    return ((alpha | epsilon), ":"_psr);
+    //};
+    //
+    //psr(a) = (head("a"_psr), ident, "->"_psr, ident);
+    //psr(b) = (head("b"_psr), ident, "->"_psr, "0"_psr);
+    //psr(c) = (head("c"_psr), "0"_psr, "->"_psr, ident);
+    //
+    //psr(d) = (head("d"_psr), identlist, "->"_psr, "0"_psr);
+    //psr(e) = (head("e"_psr), "0"_psr, "->"_psr, identlist);
+    //psr(f) = (head("f"_psr), identlist, "->"_psr, ident);
+    //psr(g) = (head("g"_psr), ident, "->"_psr, identlist);
+    //psr(h) = (head("h"_psr), identlist, "->"_psr, identlist);
+
+    auto together = [](const Parser& head, const Parser& body) {
+        return (head, body) | body;
+    };
+
+    psr(a) = together("a"_psr, (ident, "->"_psr, ident));
+    psr(b) = together("b"_psr, (ident, "->"_psr, "0"_psr));
+    psr(c) = together("c"_psr, ("0"_psr, "->"_psr, ident));
+    psr(d) = $curry(together).apply("d"_psr, (identlist, "->"_psr, "0"_psr)); // 也可以用 lexpsr 语言内置的 $curry + apply
+    psr(e) = together("e"_psr, ("0"_psr, "->"_psr, identlist));
+    psr(f) = together("f"_psr, (identlist, "->"_psr, ident));
+    psr(g) = together("g"_psr, (ident, "->"_psr, identlist));
+    psr(h) = together("h"_psr, (identlist, "->"_psr, identlist));
+
+    psr(expr) = ((a | b | c | d | e | f | g | h), ";"_psr);
+    psr(root) = expr[at_least_1];
+
+    // case 1
+    {
+        reset();
+        script = R"(
+             abc -> dfcwe;
+        )";
+
+        ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
+        if (ScanState::OK != ss) {
+            std::cout << err << std::endl;
+        }
+        else {
+            assert(script.size() == offset);
+        }
+    }
+
+    // case 2
+    {
+        reset();
+        script = R"(
+             (abc, dd) -> 0;
+        )";
+
+        ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
+        if (ScanState::OK != ss) {
+            std::cout << err << std::endl;
+        }
+        else {
+            assert(script.size() == offset);
+        }
+    }
+
+    // case 3
+    {
+        reset();
+
+        // 数字 1 应当出错
+        script = R"(
+             (abc, dd) -> (ds, 1);
+        )";
+
+        ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
+        if (ScanState::OK != ss) {
+            std::cout << err << std::endl;
+        }
+        else {
+            assert(script.size() == offset);
+        }
+    }
+}
+
+
 int main()
 {
     test_core();
@@ -547,6 +661,7 @@ int main()
     test_xml3();
     test_xml4();
     test_with_args();
+    test_friendly_error();
 
     return 0;
 }
