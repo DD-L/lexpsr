@@ -566,24 +566,13 @@ void test_friendly_error()
     psr(ident) = (ident_first, ident_first('0', '9')[any_cnt]);
     psr(identlist) = ("("_psr, ident, (","_psr, ident)[any_cnt], ")"_psr);
 
-    // 注意：这里这样表达不能处理 "abc->dd;" 这样的语言，因为 a 会被 alpha 成功吃掉，进而在第二个字节期望':'失败
-    // 写成 alpha[at_most_1] 也不行
-    //auto head = [](const Parser& alpha) {
-    //    return ((alpha | epsilon), ":"_psr);
-    //};
-    //
-    //psr(a) = (head("a"_psr), ident, "->"_psr, ident);
-    //psr(b) = (head("b"_psr), ident, "->"_psr, "0"_psr);
-    //psr(c) = (head("c"_psr), "0"_psr, "->"_psr, ident);
-    //
-    //psr(d) = (head("d"_psr), identlist, "->"_psr, "0"_psr);
-    //psr(e) = (head("e"_psr), "0"_psr, "->"_psr, identlist);
-    //psr(f) = (head("f"_psr), identlist, "->"_psr, ident);
-    //psr(g) = (head("g"_psr), ident, "->"_psr, identlist);
-    //psr(h) = (head("h"_psr), identlist, "->"_psr, identlist);
-
     auto together = [](const Parser& head, const Parser& body) {
         return (head, body) | body;
+        // 注意这里：
+        //   不能写成 : return (head[at_most_1], body);
+        // 也不能写成 : return ((head | epsilon), body);
+        //   因为他们都不能处理 "abc->dd;" 这样的语言：
+        //     首字节 'a' 会被 head 成功吃掉，进而在第二个字节遇到'b'，但是它期望':'导致失败
     };
 
     psr(a) = together("a"_psr, (ident, "->"_psr, ident));
