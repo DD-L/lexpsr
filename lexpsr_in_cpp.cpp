@@ -571,7 +571,7 @@ void test_friendly_error()
         // 注意这里：
         //   不能写成 : return (head[at_most_1], body);
         // 也不能写成 : return ((head | epsilon), body);
-        //   因为他们都不能处理 "abc->dd;" 这样的语言：
+        //   因为它们都不能处理 "abc->dd;" 这样的语言：
         //     首字节 'a' 会被 head 成功吃掉，进而在第二个字节遇到'b'，但是它期望':'导致失败
     };
 
