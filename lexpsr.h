@@ -97,7 +97,9 @@ namespace _LEXPARSER_CORE {
     struct CrimeScenes {
         void Reset() noexcept { m_db.clear(); }
         void OnRecord(std::size_t old, std::size_t curr) {
-            m_db.emplace_back(old, curr);
+            if ((m_db.empty()) || (m_db.back() != std::make_pair(old, curr))) {
+                m_db.emplace_back(old, curr);
+            }
         }
 
         std::vector<std::pair<std::size_t, std::size_t>> m_db; // { old, curr }
@@ -779,15 +781,16 @@ namespace _LEXPARSER_SHELL
         }
 
         // CharRangePsr helper function
-        Parser& operator()(const std::pair<char, char>& range)
+        Parser operator()(const std::pair<char, char>& range) const
         {
-            assert(std::get_if<CharSetPsr>(&m_psr));
-            std::get<CharSetPsr>(m_psr).AddMember(core::range_v, range);
-            return *this;
+            assert(std::get_if<CharSetPsr>(&unwrap().m_psr));
+            auto copy = *this;
+            std::get<CharSetPsr>(copy.unwrap().m_psr).AddMember(core::range_v, range);
+            return copy;
         }
 
         // CharRangePsr helper function
-        Parser& operator()(char b, char e) {
+        Parser operator()(char b, char e) const {
             return (*this)(std::make_pair(b, e));
         }
 
