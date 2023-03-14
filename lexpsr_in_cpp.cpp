@@ -39,7 +39,7 @@ int test_core()
 
     std::string input = "2 + 4 = 7";
     ScanState ss = root(input.data(), input.size(), offset, ctx, err);
-    assert(ScanState::OK == ss);
+    assert(ScanState::OK == ss && input.size() == offset);
     (void)ss;
 
     return 0;
@@ -163,7 +163,7 @@ void test_shell1()
         ctx.SetWhiteSpaces((ws | comment)[any_cnt]);
 
         core::ScanState res = root.ScanScript(script.data(), script.size(), offset, ctx, err);
-        assert(core::ScanState::OK == res);
+        assert(core::ScanState::OK == res && script.size() == offset);
         std::pair<bool, std::size_t> ac_res = InvokeActions(ctx, err);
         assert(ac_res.first);
     }
@@ -197,7 +197,7 @@ void test_shell_unordered()
 
         ctx.SetWhiteSpaces(wss); // or `ctx.SetWhiteSpaces(Parser::EatWss);`
         core::ScanState res = root.ScanScript(script.data(), script.size(), offset, ctx, err);
-        assert(core::ScanState::OK == res);
+        assert(core::ScanState::OK == res && script.size() == offset);
         std::pair<bool, std::size_t> ac_res = InvokeActions(ctx, err);
         assert(ac_res.first);
     }
@@ -410,8 +410,9 @@ void test_xml3()
     core::Context ctx;
     std::string err;
     ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
-    if (ScanState::OK != ss) {
+    if (ScanState::OK != ss || script.size() != offset) {
         std::cout << err << std::endl;
+        std::cerr << ctx.ErrorPrompts(script) << std::endl;
     }
     else {
         assert(ScanState::OK == ss && script.size() == offset);
@@ -472,8 +473,9 @@ void test_xml4()
     core::Context ctx;
     std::string err;
     ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
-    if (ScanState::OK != ss) {
+    if (ScanState::OK != ss || script.size() != offset) {
         std::cout << err << std::endl;
+        std::cerr << ctx.ErrorPrompts(script) << std::endl;
     }
     else {
         assert(ScanState::OK == ss && script.size() == offset);
@@ -488,7 +490,6 @@ void test_xml4()
 
 void test_with_args()
 {
-
     using namespace lexpsr_shell;
     psr(root) = $curry([](Parser p1, Parser p2, Parser p3) {
         psr(space) = " ";
@@ -530,8 +531,9 @@ void test_with_args()
     offset = 0;
     ss = root.with_args(p1, p2, p3).ScanScript(script.data(), script.size(), offset, ctx, err);
     assert(ScanState::OK != ss && script.size() != offset); (void)ss;
-    if (ScanState::OK != ss) {
+    if (ScanState::OK != ss || script.size() != offset) {
         std::cerr << err << std::endl;
+        std::cerr << ctx.ErrorPrompts(script) << std::endl;
     }
     std::cout << "-----------" << std::endl;
 }
@@ -595,8 +597,9 @@ void test_friendly_error()
         )";
 
         ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
-        if (ScanState::OK != ss) {
-            std::cout << err << std::endl;
+        if (ScanState::OK != ss || script.size() != offset) {
+            std::cerr << err << std::endl;
+            std::cerr << ctx.ErrorPrompts(script) << std::endl;
         }
         else {
             assert(script.size() == offset);
@@ -611,8 +614,9 @@ void test_friendly_error()
         )";
 
         ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
-        if (ScanState::OK != ss) {
-            std::cout << err << std::endl;
+        if (ScanState::OK != ss || script.size() != offset) {
+            std::cerr << err << std::endl;
+            std::cerr << ctx.ErrorPrompts(script) << std::endl;
         }
         else {
             assert(script.size() == offset);
@@ -623,19 +627,26 @@ void test_friendly_error()
     {
         reset();
 
-        // 数字 1 应当出错
+        // 数字 123 应当出错
         script = R"(
-             (abc, dd) -> (ds, 1);
+            abc -> dfcwe;
+            abc -> dfcwe324;
+            (abc, dd) -> 0;
+            (abc, dd) -> (ds, 123);
+            e: 0 -> (ident);
         )";
 
         ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
-        if (ScanState::OK != ss) {
+        if (ScanState::OK != ss || script.size() != offset) {
             std::cout << err << std::endl;
+            std::cout << ctx.ErrorPrompts(script) << std::endl;
         }
         else {
             assert(script.size() == offset);
         }
     }
+
+    std::cout << "-----------" << std::endl;
 }
 
 

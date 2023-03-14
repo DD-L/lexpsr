@@ -95,14 +95,12 @@ namespace _LEXPARSER_CORE {
     };
 
     struct CrimeScenes {
-        void Reset() noexcept { m_db.clear(); }
-        void OnRecord(std::size_t old, std::size_t curr) {
-            if ((m_db.empty()) || (m_db.back() != std::make_pair(old, curr))) {
-                m_db.emplace_back(old, curr);
-            }
+        enum : std::size_t { Invaild = ~static_cast<std::size_t>(0) };
+        void Reset() noexcept { m_max = Invaild; }
+        void OnRecord(std::size_t, std::size_t curr) noexcept {
+            if (Invaild == m_max || curr > m_max) { m_max = curr; }
         }
-
-        std::vector<std::pair<std::size_t, std::size_t>> m_db; // { old, curr }
+        std::size_t m_max = Invaild;
     };
 
     class Context {
@@ -140,6 +138,33 @@ namespace _LEXPARSER_CORE {
         Context& ResetLazyAction() {
             m_lazy_action.clear();
             return *this;
+        }
+
+        std::string ErrorPrompts(const std::string& script) const {
+            if (m_crime_scenes.m_max < script.size()) {
+                auto format = [&script, this](bool lastline, std::size_t pos, std::size_t last, std::size_t line_num) {
+                    const std::string line_content = script.substr(last, pos + 1u - last);
+                    const std::size_t offset_in_line = m_crime_scenes.m_max - last;
+
+                    const std::string line_num_str = " " + std::to_string(line_num);
+                    return line_num_str + " | " + line_content + (lastline ? "\n" : "")
+                        + std::string(line_num_str.size(), ' ') + " | " + std::string(offset_in_line, ' ') + "^";
+                };
+                std::size_t pos = 0;
+                std::size_t last = 0;
+                std::size_t line_num = 0;
+                for (; pos < script.size(); pos = script.find('\n', pos), ++line_num) {
+                    if (pos > m_crime_scenes.m_max) { // found
+                        return format(false, pos, last, line_num);
+                    }
+                    last = ++pos;
+                }
+
+                if (std::string::npos == pos) { // last line
+                    return format(true, pos, last, line_num);
+                }
+            }
+            return {}; // not found
         }
 
         void GoBackToWithRecording(std::size_t& offset, std::size_t oldOffset) {
