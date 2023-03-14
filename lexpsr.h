@@ -140,11 +140,12 @@ namespace _LEXPARSER_CORE {
             return *this;
         }
 
+        std::size_t ErrorOffset() const { return m_crime_scenes.m_max; }
         std::string ErrorPrompts(const std::string& script) const {
-            if (m_crime_scenes.m_max < script.size()) {
+            if (ErrorOffset() < script.size()) {
                 auto format = [&script, this](bool lastline, std::size_t pos, std::size_t last, std::size_t line_num) {
                     const std::string line_content = script.substr(last, pos + 1u - last);
-                    const std::size_t offset_in_line = m_crime_scenes.m_max - last;
+                    const std::size_t offset_in_line = ErrorOffset() - last;
 
                     const std::string line_num_str = " " + std::to_string(line_num);
                     return line_num_str + " | " + line_content + (lastline ? "\n" : "")
@@ -154,7 +155,7 @@ namespace _LEXPARSER_CORE {
                 std::size_t last = 0;
                 std::size_t line_num = 0;
                 for (; pos < script.size(); pos = script.find('\n', pos), ++line_num) {
-                    if (pos > m_crime_scenes.m_max) { // found
+                    if (pos > ErrorOffset()) { // found
                         return format(false, pos, last, line_num);
                     }
                     last = ++pos;
