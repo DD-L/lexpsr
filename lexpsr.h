@@ -89,7 +89,10 @@ namespace _LEXPARSER_CORE {
     };
 
     struct ActionMaterial {
-        const StrRef         m_token;
+#ifndef __clang__
+        const  // 修饰 `StrRef m_token`。原因是 clang 的编译期检查过于严格，在 std::vector::resize() 中不会被通过，即便 vector 是只减不增
+#endif // !__clang__
+        StrRef               m_token;
         std::size_t          m_scanner_info = 0; // just for loop cnt
         const ActionScanner* m_action_scanner = nullptr;
     };
@@ -705,10 +708,21 @@ namespace _LEXPARSER_SHELL
     using FatalIfPsr       = core::FatalIf;
     using NopPsr           = core::Nop;
 
-    struct Parser;
     struct LambdaPsr : std::function<Parser(const Parser&)> { // currying. for example, (Parser -> Parser) -> Parser == Parser -> (Parser -> Parser).
         typedef std::vector<std::shared_ptr<Parser>> Args;
+#ifndef __clang__
         using std::function<Parser(const Parser&)>::function;
+#else
+        // clang BUG: https://github.com/llvm/llvm-project/issues/61443
+        LambdaPsr() = default;
+        LambdaPsr(const LambdaPsr&) = default;
+        LambdaPsr(LambdaPsr&&) = default;
+        LambdaPsr(const std::function<Parser(const Parser&)>& f) : std::function<Parser(const Parser&)>(f) {}
+        LambdaPsr(std::function<Parser(const Parser&)>&& f) : std::function<Parser(const Parser&)>(std::move(f)) {}
+
+        LambdaPsr& operator=(const LambdaPsr&) = default;
+        LambdaPsr& operator=(LambdaPsr&&) = default;
+#endif // !__clang__
         Args m_args; // 携带的实参，从该函数递归执行 apply
     };
 
@@ -899,7 +913,14 @@ namespace _LEXPARSER_SHELL
 
     public:
         // 吃掉一个白字符
-        static ScanState EatWs(const char* script, std::size_t len, std::size_t& offset, ...) noexcept {
+        static ScanState EatWs(const char* script, std::size_t len, std::size_t& offset, 
+#ifdef __clang__
+            // clang BUG: https://github.com/llvm/llvm-project/issues/61444
+            core::Context&, std::string&
+#else
+            ...
+#endif // !__clang__
+            ) noexcept {
             if (offset < len && (std::isspace((uint8_t)script[offset]))) {
                 ++offset;
                 return ScanState::OK;
@@ -908,13 +929,13 @@ namespace _LEXPARSER_SHELL
         }
 
         // 吃掉一批连续的白字符，总是成功
-        static ScanState EatWss(const char* script, std::size_t len, std::size_t& offset, ...) noexcept {
+        static ScanState EatWss(const char* script, std::size_t len, std::size_t& offset, core::Context& ctx, std::string& err) noexcept {
             while (offset < len) {
-                if (ScanState::OK != EatWs(script, len, offset)) { break; }
+                if (ScanState::OK != EatWs(script, len, offset, ctx, err)) { break; }
             }
             return ScanState::OK;
         }
-    
+
     public:
         VariantParser                     m_psr;
         std::string                       m_name;
