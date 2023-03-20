@@ -274,7 +274,7 @@ void test_xml1()
     psr(node_begin) = ident <<= node_begin_ac;
     psr(node_end) = ident <<= node_end_ac;
     psr(leaf) = ident <<= leaf_ac;
-    psr(values) = (leaf | node)[at_least_1];
+    psr(values) = (leaf | node.weak())[at_least_1];
     node = (_, "<"_psr, _, node_begin, _, ">"_psr, _, values, _, "<"_psr, _, "/"_psr, _, node_end, _, ">"_psr, _);
 
     /////////////////////
@@ -348,7 +348,7 @@ void test_xml2()
     psr(node_begin) = ident <<= node_begin_ac;
     psr(node_end) = ident <<= node_end_ac;
     psr(leaf) = ident <<= leaf_ac;
-    psr(values) = (leaf | node)[at_least_1];
+    psr(values) = (leaf | node.weak())[at_least_1];
     node = (_, "<"_psr, _, node_begin, _, ">"_psr, _, values, _, "<"_psr, _, "/"_psr, _, node_end, _, ">"_psr, _);
 
     /////////////////////
@@ -390,7 +390,7 @@ void test_xml3()
     psr(ident) = range('0', '9')('a', 'z')('A', 'Z')('_', '_')[at_least_1];
     psr(leaf) = ident;
 
-    decl_psr(node) = $curry([&_, &leaf, node](const Parser& ident) {
+    decl_psr(node) = $curry([&_, &leaf, &node](const Parser& ident) {
     
         decl_psr(node_name);
         psr(head) = ("<"_psr, _, ident.slice_as_str_psr(node_name), _, ">"_psr);
@@ -450,7 +450,7 @@ void test_xml4()
     psr(ident) = range('0', '9')('a', 'z')('A', 'Z')('_', '_')[at_least_1];
     psr(leaf) = ident;
 
-    decl_psr(node) = $curry([&_, &leaf, node](const Parser& ident) {
+    decl_psr(node) = $curry([&_, &leaf, &node](const Parser& ident) {
 
         decl_psr(tail);
         psr(name_with_cb) = ident.with_slice_callback([tail, &_](core::StrRef slice) mutable {
@@ -649,6 +649,69 @@ void test_friendly_error()
     std::cout << "-----------" << std::endl;
 }
 
+void test_as_int() 
+{
+    /*
+
+    field a = int;
+    field b = int;
+    struct a 1;
+    struct b 1;
+
+    psr c = a b;
+    psr s = "{" c*(a!=0) "}";
+    root = s;
+
+    # 它这里 c*(a != 0) 表达的有歧义：
+    #  1. 循环 c ，直到条件 (a != 0) 不满足； 
+    #  2. 循环 c 任意多次，同时当条件 (a != 0) 不满足时，停止贪婪的循环。
+
+    下面实现上述表达 1：
+    */
+
+    using namespace lexpsr_shell;
+
+    auto ac_a = [](const ActionArgs& arg) {
+        std::cout << "a:" << arg.m_action_material.m_token.to_std_string() << std::endl;
+        return true;
+    };
+
+    auto ac_b = [](const ActionArgs& arg) {
+        std::cout << "b:" << arg.m_action_material.m_token.to_std_string() << std::endl;
+        return true;
+    };
+
+    decl_psr(loop) = $curry([&loop, ac_a, ac_b]() {
+        decl_psr(a) = range(0, char(0xff)) <<= ac_a;
+        decl_psr(b) = range(0, char(0xff)) <<= ac_b;
+
+        auto int_a = local_int<int>();
+        psr(c) = (a.slice_as_int(int_a), b);
+        return (c, (eq(int_a, 0) | loop.with_args()));
+    });
+
+
+    psr(root) = ("{"_psr, loop.with_args(), "}"_psr);
+
+    core::Context ctx;
+    std::size_t offset = 0;
+    std::string err;
+    std::string script("{ABCDEF" "\x00" "I}", 10u);
+
+    ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
+    if (ScanState::OK != ss || script.size() != offset) {
+        std::cerr << err << std::endl;
+        std::cerr << ctx.ErrorPrompts(script) << std::endl;
+    }
+    else {
+        assert(script.size() == offset);
+        auto res = InvokeActions(ctx, err);
+        if (!res.first) {
+            std::cerr << err << std::endl;
+        }
+    }
+    std::cout << "-----------" << std::endl;
+}
 
 int main()
 {
@@ -662,6 +725,7 @@ int main()
     test_xml4();
     test_with_args();
     test_friendly_error();
+    test_as_int();
 
     return 0;
 }

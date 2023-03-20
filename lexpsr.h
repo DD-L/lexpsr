@@ -13,6 +13,7 @@
 #include <type_traits>
 #include <iterator>
 #include <variant>
+#include <optional>
 
 #ifndef _LEXPARSER_CORE
 #define _LEXPARSER_CORE lexpsr_core
@@ -67,7 +68,7 @@ namespace _LEXPARSER_CORE {
 
     class Context;
     struct ActionMaterial;
-    class ActionScanner;
+    namespace details { class ActionScanner; }
 
     enum class ScanState { OK = 0, Dismatch, Fatal }; // 进入引导词之后的失配即 Fatal
 
@@ -92,9 +93,9 @@ namespace _LEXPARSER_CORE {
 #ifndef __clang__
         const  // 修饰 `StrRef m_token`。原因是 clang 的编译期检查过于严格，在 std::vector::resize() 中不会被通过，即便 vector 是只减不增
 #endif // !__clang__
-        StrRef               m_token;
-        std::size_t          m_scanner_info = 0; // just for loop cnt
-        const ActionScanner* m_action_scanner = nullptr;
+        StrRef                                  m_token;
+        std::size_t                             m_scanner_info = 0; // just for loop cnt
+        std::shared_ptr<details::ActionScanner> m_action_scanner;
     };
 
     struct CrimeScenes {
@@ -406,47 +407,72 @@ namespace _LEXPARSER_CORE {
         std::string m_err_msg;
     }; // class FatalIf
 
+    namespace details {
+        class ActionScanner : public details::DefaultClass, public std::enable_shared_from_this<ActionScanner> { // 为了规避 lambda 函数中局部 action 对象悬垂问题
+        public:
+            using details::DefaultClass::DefaultClass;
+
+            template <class Scanner, class ActionType>
+            ActionScanner(Scanner&& scanner, ActionType&& action)
+                : m_scanner(std::forward<Scanner>(scanner)), m_action(std::forward<ActionType>(action))
+            {}
+
+            ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept {
+                if (!m_scanner) { // 纯 Action
+                    const char* begin = data + offset;
+                    ctx.m_lazy_action.emplace_back(ActionMaterial{ StrRef{begin, begin}, ctx.m_scanner_info, const_cast<ActionScanner*>(this)->shared_from_this() });
+                    return ScanState::OK;
+                }
+
+                std::size_t old_lazy_cnt = ctx.m_lazy_action.size();
+                const char* begin = data + offset;
+                ScanState ss = m_scanner(data, len, offset, ctx, err);
+                if (ScanState::OK == ss) {
+                    const char* end = data + offset;
+                    ctx.m_lazy_action.emplace_back(ActionMaterial{ StrRef{ begin, end }, ctx.m_scanner_info, const_cast<ActionScanner*>(this)->shared_from_this() });
+                }
+                else if (ScanState::Dismatch == ss) {
+                    ctx.m_lazy_action.resize(old_lazy_cnt);
+                }
+
+                return ss; // 原样抛出
+            }
+
+            bool InvokeAction(const ActionMaterial& am, Context& ctx, std::string& err) const noexcept {
+                if (m_action) {
+                    return m_action(am, ctx, err);
+                }
+                return true; // 兼容 “空 Action”
+            }
+
+        private:
+            ScanFunc    m_scanner;
+            Action      m_action;
+        }; // class ActionScanner
+    } // namespace details
+
     class ActionScanner : public details::DefaultClass {
     public:
         using details::DefaultClass::DefaultClass;
 
         template <class Scanner, class ActionType>
         ActionScanner(Scanner&& scanner, ActionType&& action)
-            : m_scanner(std::forward<Scanner>(scanner)), m_action(std::forward<ActionType>(action))
+            : m_impl(std::make_shared<details::ActionScanner>(std::forward<Scanner>(scanner), std::forward<ActionType>(action)))
         {}
 
         ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context& ctx, std::string& err) const noexcept {
-            if (!m_scanner) { // 纯 Action
-                const char* begin = data + offset;
-                ctx.m_lazy_action.emplace_back(ActionMaterial{ StrRef{begin, begin}, ctx.m_scanner_info, this });
-                return ScanState::OK;
-            }
-
-            std::size_t old_lazy_cnt = ctx.m_lazy_action.size();
-            const char* begin = data + offset;
-            ScanState ss = m_scanner(data, len, offset, ctx, err);
-            if (ScanState::OK == ss) {
-                const char* end = data + offset;
-                ctx.m_lazy_action.emplace_back(ActionMaterial{ StrRef{ begin, end }, ctx.m_scanner_info, this });
-            }
-            else if (ScanState::Dismatch == ss) {
-                ctx.m_lazy_action.resize(old_lazy_cnt);
-            }
-
-            return ss; // 原样抛出
+            assert(m_impl);
+            return (*m_impl)(data, len, offset, ctx, err);
         }
 
         bool InvokeAction(const ActionMaterial& am, Context& ctx, std::string& err) const noexcept {
-            if (m_action) {
-                return m_action(am, ctx, err);
-            }
-            return true; // 兼容 “空 Action”
+            assert(m_impl);
+            return m_impl->InvokeAction(am, ctx, err);
         }
 
     private:
-        ScanFunc    m_scanner;
-        Action      m_action;
-    }; // class ActionScanner
+        std::shared_ptr<details::ActionScanner> m_impl{ std::make_shared<details::ActionScanner>() };
+    };
 
     class PreparedScanner {
     public:
@@ -539,12 +565,12 @@ namespace _LEXPARSER_CORE {
         }
 
         explicit CharBranch(details::range_arg_t, bool negative, const Range& range) { // negative_range
-            assert(range.first <= range.second);
-            if (0 < range.first) {
-                AddMember(range_v, Range(0, range.first - 1));
+            assert((uint8_t)range.first <= (uint8_t)range.second);
+            if (0 < (uint8_t)range.first) {
+                AddMember(range_v, Range(0, char((uint8_t)(range.first) - 1u)));
             }
-            if (range.second < (~static_cast<char>(0))) {
-                AddMember(range_v, Range(range.second + 1, (~static_cast<char>(0))));
+            if ((uint8_t)range.second < uint8_t(~static_cast<uint8_t>(0))) {
+                AddMember(range_v, Range(char((uint8_t)range.second + 1u), char(~static_cast<uint8_t>(0))));
             }
         }
 
@@ -576,9 +602,9 @@ namespace _LEXPARSER_CORE {
         }
 
         void AddMember(details::range_arg_t, const Range& range) {// range
-            assert(range.first <= range.second);
-            if (range.first < range.second) {
-                for (int v = range.first; v < (int)(range.second) + 1; ++v) {
+            assert((uint8_t)range.first <= (uint8_t)range.second);
+            if ((uint8_t)range.first < (uint8_t)range.second) {
+                for (uint32_t v = range.first; v < uint32_t((uint8_t)(range.second)) + 1u; ++v) {
                     AddMember(std::initializer_list<char>{ char(v) });
                 }
             }
@@ -594,6 +620,8 @@ namespace _LEXPARSER_CORE {
     class Token {
     public:
         explicit Token(const std::string& tok) : m_tok(tok) {}
+        explicit Token(const StrRef& tok) : m_tok(tok.to_std_string()) {}
+        template <std::size_t N> explicit Token(const char(&arr)[N]) : m_tok(arr){}
         Token(const Token&) = default;
         Token(Token&&) = default;
         Token& operator=(const Token&) = default;
@@ -677,7 +705,11 @@ namespace _LEXPARSER_SHELL
         using any_cnt_t    = LoopCntPair(*)(AnyCnt*);
         using at_least_1_t = LoopCntPair(*)(AtLeast1*);
         using at_most_1_t  = LoopCntPair(*)(AtMost1*);
+
+        struct Forwarder { template <class T> constexpr T&& operator()(T&& arg) const noexcept { return std::forward<T>(arg); } };
     } // namespace details
+
+    template <class T> static inline T& _PsrForward(T& v) { return details::Forwarder()(v); }
 
     namespace { //  free function
         details::LoopCntPair loop_cnt(std::size_t c) noexcept {
@@ -696,6 +728,54 @@ namespace _LEXPARSER_SHELL
         details::LoopCntPair at_most(std::size_t n) noexcept { return details::LoopCntPair{ 0, n }; }
         details::LoopCntPair at_most_1(details::AtMost1* = nullptr) { return at_most(1u); }
     } // namespace free function
+
+    namespace tools {
+        struct _HostOrder {
+            void operator()(uint8_t* dst, const char* src, std::size_t len) const noexcept {
+                std::memmove(dst, src, len);
+            }
+        };
+
+        struct _Net2HostOrder {
+            void operator()(uint8_t* dst, const char* src, std::size_t len) const noexcept {
+                for (std::size_t i = 0; i < len; ++i) { dst[i] = src[len - i - 1u]; }
+            }
+        };
+
+        template <class Int, class Copy = _HostOrder>
+        struct ToInt {
+            Int operator()(const core::StrRef& tk) const {
+                if (0 != tk.len) {
+                    union {
+                        Int     value = 0;
+                        uint8_t data[sizeof(Int)];
+                    };
+
+                    Copy()(data, tk.data, (std::min)(tk.len, sizeof(data)));
+                    return (value);
+                }
+                return {};
+            }
+        };
+
+        typedef ToInt<uint64_t, _HostOrder> ToU64;
+        typedef ToInt<uint32_t, _HostOrder> ToU32;
+        typedef ToInt<uint16_t, _HostOrder> ToU16;
+        typedef ToInt<uint8_t, _HostOrder>  ToU8;
+        typedef ToInt<int64_t, _HostOrder>  ToI64;
+        typedef ToInt<int32_t, _HostOrder>  ToI32;
+        typedef ToInt<int16_t, _HostOrder>  ToI16;
+        typedef ToInt<int8_t, _HostOrder>   ToI8;
+
+        typedef ToInt<uint64_t, _Net2HostOrder> N2HU64;
+        typedef ToInt<uint32_t, _Net2HostOrder> N2HU32;
+        typedef ToInt<uint16_t, _Net2HostOrder> N2HU16;
+        typedef ToInt<uint8_t, _Net2HostOrder>  N2HU8;
+        typedef ToInt<int64_t, _Net2HostOrder>  N2HI64;
+        typedef ToInt<int32_t, _Net2HostOrder>  N2HI32;
+        typedef ToInt<int16_t, _Net2HostOrder>  N2HI16;
+        typedef ToInt<int8_t, _Net2HostOrder>   N2HI8;
+    } // namespace tools
 
     struct UnbindPsr {};
     using StrPsr           = core::Token;
@@ -726,13 +806,39 @@ namespace _LEXPARSER_SHELL
         Args m_args; // 携带的实参，从该函数递归执行 apply
     };
 
-    struct IntPsr {}; // 表示数字的 psr , 兼容丘奇数与立即数 @TODO
-    using PreDeclPsr = std::shared_ptr<Parser>;
+    // struct IntPsr {}; // 表示数字的 psr , 兼容丘奇数与立即数 @TODO
+    template <class Int, class = typename std::enable_if<std::is_integral<Int>::value>::type>
+    using IntVal = std::shared_ptr<std::optional<Int>>;
+    namespace details {
+        template <class Val>
+        using TraitValueType = typename Val::element_type::value_type;
+
+        template <class Int>
+        struct IsInt : std::is_integral<Int> {};
+
+        template <class Int>
+        struct IsInt <IntVal<Int>> : std::true_type { typedef Int type; };
+
+        template <class Int, class = std::enable_if_t<std::is_integral_v<std::decay_t<Int>>>>
+        static inline constexpr bool valid_int(Int) { return true; }
+
+        template <class Int>
+        static inline constexpr bool valid_int(const IntVal<Int>& i) { return (i && i->has_value()); }
+
+        template <class Int, class = std::enable_if_t<std::is_integral_v<std::decay_t<Int>>>>
+        static inline constexpr Int intrinsic_int(Int i) { return i; }
+
+        template <class Int>
+        static inline constexpr Int intrinsic_int(const IntVal<Int>& i) { return i->value(); }
+    }
+
+    using PreDeclPsr     = std::shared_ptr<Parser>;
+    using WeakPreDeclPsr = std::weak_ptr<Parser>;
 
     struct Parser {
         typedef std::variant<UnbindPsr,
             StrPsr, CharSetPsr, SequencePsr, BranchPsr, LoopPsr, ActionPsr, NextNotPsr, FatalIfPsr, Scanner, NopPsr, LambdaPsr,
-            PreDeclPsr
+            PreDeclPsr, WeakPreDeclPsr
         > VariantParser;
 
     public:
@@ -789,6 +895,15 @@ namespace _LEXPARSER_SHELL
             }
         }
 
+        Parser weak() const {
+            assert(std::get_if<PreDeclPsr>(&(m_psr)));
+            WeakPreDeclPsr weak = std::get<PreDeclPsr>(m_psr); // unwrap().m_psr
+            auto copy = Parser(weak);
+            copy.m_name = m_name;
+            copy.m_slice_callback = m_slice_callback;
+            return copy;
+        }
+
         template <class... Psrs>
         Parser with_args(const Parser& arg, Psrs&&... rest) const { // 使得 LambdaPsr 携带实参
             assert(std::get_if<LambdaPsr>(&(unwrap().m_psr)));
@@ -802,21 +917,38 @@ namespace _LEXPARSER_SHELL
         template <class... Psrs>
         Parser apply(const Parser& arg, Psrs&&... rest) const {
             assert(std::get_if<LambdaPsr>(&(unwrap().m_psr)));
-            return std::get<LambdaPsr>(unwrap().m_psr)(arg).apply(std::forward<Psrs>(rest)...);
+            if constexpr (sizeof ... (rest) == 0) {
+                return std::get<LambdaPsr>(unwrap().m_psr)(arg);
+            }
+            else {
+                return std::get<LambdaPsr>(unwrap().m_psr)(arg).apply(std::forward<Psrs>(rest)...);
+            }
         }
-        const Parser& apply() const { return *this; }
+        Parser apply() const {        //const Parser& apply() const { return *this; }
+            static const LEXPSR_KEYWORD_PSR(whatever);
+            return apply(whatever);
+        };
 
-        Parser slice_as_str_psr(Parser& out) const {
+        template <class _Trans = details::Forwarder>
+        Parser slice_as_str_psr(Parser& out, _Trans&& transducer = _Trans()) const {
             assert(std::get_if<PreDeclPsr>(&out.m_psr)); // out 中的 shared 对象被 this.m_slice_callback 持有
-            return with_slice_callback([out](core::StrRef tok) mutable {
-                out = Parser(StrPsr{ tok.to_std_string() });
+            return with_slice_callback([out, transducer](core::StrRef tok) mutable {
+                out = Parser(StrPsr{ transducer(tok) });
+            });
+        }
+
+        template <class Int, class _Trans = tools::ToInt<Int>>
+        Parser slice_as_int(IntVal<Int>& value, _Trans&& transducer = _Trans()) const {
+            assert(!!value); // 不应该为空
+            return with_slice_callback([value, transducer](core::StrRef tok) mutable { 
+                *value = transducer(tok); 
             });
         }
 
         template <class SliceHandler>
         Parser with_slice_callback(SliceHandler&& h) const {
             auto copy(*this);
-            copy.m_slice_callback = std::forward<SliceHandler>(h);
+            copy.unwrap().m_slice_callback = std::forward<SliceHandler>(h);
             return copy;
         }
 
@@ -869,19 +1001,26 @@ namespace _LEXPARSER_SHELL
                 else if constexpr (std::is_same<P, LambdaPsr>::value) {
                     if (!_psr.m_args.empty()) { // 非空意味着当前 Lambda 携带实参，需执行 apply
                         Parser psr_fn = *this;  // copy
-                        for (auto&& arg : _psr.m_args) {
+                        const std::string& func_name = (anonymous() ? "_anonymous_fn" : name()) + "_$arg";
+                        for (std::size_t i = 0; i < _psr.m_args.size(); ++i) {
+                            auto&& arg = _psr.m_args[i];
                             assert(!!arg);
-                            psr_fn = psr_fn.apply(*arg); // psr_fn.set_name(); 这里可以添加 psr 名字信息，以方便调试，比如 func_$0 func_$1 ...
+                            psr_fn.set_name(func_name + std::to_string(i));
+                            psr_fn = psr_fn.apply(*arg);
                         }
                         return (ret = psr_fn(script, len, offset, ctx, err));
                     }
-                    err =  (m_name.empty() ? m_name :  "`" + m_name + "` ") + "LambdaPsr: expect a parameter, but here a null is provided.";
-                    assert(((void)0, false)); // 没有参数可以传递给该 lambda
-                    return (ret = ScanState::Fatal);
+                    return (ret = apply()(script, len, offset, ctx, err));
                 }
                 else if constexpr (std::is_same<P, PreDeclPsr>::value) {
                     assert(nullptr != _psr);
                     return (ret = (*_psr)(script, len, offset, ctx, err));
+                }
+                else if constexpr (std::is_same<P, WeakPreDeclPsr>::value) {
+                    assert(!_psr.expired());
+                    auto tmp = _psr.lock();
+                    assert(nullptr != tmp);
+                    return (ret = (*tmp)(script, len, offset, ctx, err));
                 }
                 else {
                     if (ctx.IgnoreWhiteSpaces() && (!ctx.InWhiteSpacesPsr())) {
@@ -1056,7 +1195,7 @@ namespace _LEXPARSER_SHELL
                 }));
             }
             else {
-                return f();
+                return Parser(LambdaPsr([=](const Parser&) { return f(); })); // or return f();
             }
         }
 
@@ -1067,6 +1206,47 @@ namespace _LEXPARSER_SHELL
         [[maybe_unused]] const Parser wss(Scanner(Parser::EatWss), "wss");          // wss 吃掉一批连续的白字符，永远成功
         [[maybe_unused]] const Parser utf8bom(StrPsr{ "\xEF\xBB\xBF" }, "utf8bom"); // UTF-8 编码的 BOM 头，通常这样使用：(utf8bom | epsilon), 或 ignore_utf8bom
         [[maybe_unused]] const Parser ignore_utf8bom(utf8bom | epsilon);            // 可表达 UTF-8 BOM 头允许被忽略的 psr
+
+        template <class Op, class Int1, class Int2,
+            class = typename std::enable_if<details::IsInt<Int1>::value && details::IsInt<Int2>::value>::type>
+        Parser IntCmp(Op&& op, const Int1& left, const Int2& right) {
+            return $curry([op, left, right]() {
+                if (details::valid_int(left) && details::valid_int(right)) {
+                    return op(details::intrinsic_int(left), details::intrinsic_int(right)) ? epsilon : _false;
+                }
+                return fatal_if(epsilon, "Unassigned integer variables"); // 有整数变量未赋值就使用
+            }).with_args();
+        }
+
+        template <class Int1, class Int2>
+        Parser eq(const Int1& left, const Int2& right) noexcept { // ==
+            return IntCmp(std::equal_to(), left, right);
+        }
+
+        template <class Int1, class Int2>
+        Parser ne(const Int1& left, const Int2& right) noexcept { // !=
+            return IntCmp(std::not_equal_to(), left, right);
+        }
+
+        template <class Int1, class Int2>
+        Parser gt(const Int1& left, const Int2& right) noexcept { // >
+            return IntCmp(std::greater(), left, right);
+        }
+
+        template <class Int1, class Int2>
+        Parser ge(const Int1& left, const Int2& right) noexcept { // >=
+            return IntCmp(std::greater_equal(), left, right);
+        }
+
+        template <class Int1, class Int2>
+        Parser lt(const Int1& left, const Int2& right) noexcept { // <
+            return IntCmp(std::less(), left, right);
+        }
+
+        template <class Int1, class Int2>
+        Parser le(const Int1& left, const Int2& right) noexcept { // <=
+            return IntCmp(std::less_equal(), left, right);
+        }
 
         std::pair<bool, std::size_t> InvokeActions(core::Context& ctx, std::string& err) {
             std::size_t success_cnt = 0;
@@ -1079,7 +1259,8 @@ namespace _LEXPARSER_SHELL
             }
             return std::make_pair(sz == success_cnt, success_cnt);
         }
-    } // namespace  // free function
 
-    template <class T> static inline T& _PsrForward(T& v) { return v; }
+        template <class Int>
+        IntVal<Int> local_int() noexcept { return std::make_shared<std::optional<Int>>(); }
+    } // namespace  // free function
 } // namespace _LEXPARSER_SHELL
