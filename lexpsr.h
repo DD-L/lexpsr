@@ -1052,14 +1052,8 @@ namespace _LEXPARSER_SHELL
 
     public:
         // 吃掉一个白字符
-        static ScanState EatWs(const char* script, std::size_t len, std::size_t& offset, 
-#ifdef __clang__
-            // clang BUG: https://github.com/llvm/llvm-project/issues/61444
-            core::Context&, std::string&
-#else
-            ...
-#endif // !__clang__
-            ) noexcept {
+        static ScanState EatWs(const char* script, std::size_t len, std::size_t& offset, core::Context&, std::string&) noexcept {
+            // 移除可变参数函数实现，原因是 clang BUG: https://github.com/llvm/llvm-project/issues/61444  clang 会产生一个 UB 问题
             if (offset < len && (std::isspace((uint8_t)script[offset]))) {
                 ++offset;
                 return ScanState::OK;
