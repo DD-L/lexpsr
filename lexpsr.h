@@ -981,6 +981,16 @@ namespace _LEXPARSER_SHELL
         Parser operator[](details::any_cnt_t) const { return (*this)[any_cnt()]; }
         Parser operator[](details::at_least_1_t) const { return (*this)[at_least_1()]; }
 
+        //template <class Int, class = std::enable_if_t<std::is_integral_v<Int>>>
+        //Parser plus(Int v) const {
+        //    assert(std::get_if<IntPsr>(&unwrap().m_psr));
+        //    auto copy = *this;
+        //    return Parser(LambdaPsr([v, copy](const Parser&) {
+        //        auto x = std::get<IntPsr>(copy.unwrap().m_psr).value() + v;
+        //        return Parser(local_int(x));
+        //    }));
+        //}
+
         bool anonymous() const { return name().empty(); }
         const std::string& name() const { return m_name; }
         Parser& set_name(const std::string& name) {
@@ -1256,5 +1266,8 @@ namespace _LEXPARSER_SHELL
 
         template <class Int>
         IntVal<Int> local_int() noexcept { return std::make_shared<std::optional<Int>>(); }
+
+        template <class Int>
+        IntVal<Int> local_int(Int v) noexcept { return std::make_shared<std::optional<Int>>(v); }
     } // namespace  // free function
 } // namespace _LEXPARSER_SHELL
