@@ -682,8 +682,8 @@ void test_as_int()
     };
 
     decl_psr(loop) = $curry([&loop, ac_a, ac_b]() {
-        decl_psr(a) = range(0, char(0xff)) <<= ac_a;
-        decl_psr(b) = range(0, char(0xff)) <<= ac_b;
+        psr(a) = range(0, char(0xff)) <<= ac_a;
+        psr(b) = range(0, char(0xff)) <<= ac_b;
 
         auto int_a = local_int<int>();
         psr(c) = (a.slice_as_int(int_a), b);
