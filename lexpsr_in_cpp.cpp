@@ -727,11 +727,13 @@ void test_var_loop_cnt() {
     decl_psr(loop) = $curry([&loop, ac](const Parser& cnt) -> Parser {
         psr(a) = range(0, char(0xff)) <<= ac;
         // return le(cnt, 0) | (a, loop.with_args(cnt.plus(-1)));
-        auto minus = [](auto v1, auto v2) { return v1 - v2; };
+        auto minus = [](auto v1, auto v2) { 
+            return v1 - v2; 
+        };
         return le(cnt, 0) | (a, loop.with_args(int_op(minus, cnt, 1)));
     });
 
-    psr(ignore_to_end) = range(0, char(0xff))[any_cnt];
+    psr(ignore_to_end) = any_char[any_cnt];
     psr(root) = (loop.with_args(Parser(local_int(5))), ignore_to_end);
 
     core::Context ctx;

@@ -809,6 +809,12 @@ namespace _LEXPARSER_SHELL
     template <class Int, class = typename std::enable_if<std::is_integral<Int>::value>::type>
     using IntVal = std::shared_ptr<std::optional<Int>>;
 
+    // struct IntPsr {}; // 表示数字的 psr , 兼容丘奇数与立即数 @TODO
+    typedef std::variant<
+        IntVal<int64_t>, IntVal<uint64_t>, IntVal<int32_t>, IntVal<uint32_t>,
+        IntVal<int16_t>, IntVal<uint16_t>, IntVal<int8_t>, IntVal<uint8_t>,
+    > IntPsr;
+
     namespace details {
         template <class Val>
         using TraitValueType = typename Val::element_type::value_type;
@@ -830,13 +836,18 @@ namespace _LEXPARSER_SHELL
 
         template <class Int>
         static inline constexpr Int intrinsic_int(const IntVal<Int>& i) { return i->value(); }
+
+        static inline decltype(auto) intrinsic_int(const IntPsr& i) {
+            return std::visit([](auto&& v) {
+                return intrinsic_int(v);
+            }, i);
+        }
     }
 
-    // struct IntPsr {}; // 表示数字的 psr , 兼容丘奇数与立即数 @TODO
-    typedef std::variant<
-        IntVal<int64_t>, IntVal<uint64_t>, IntVal<int32_t>, IntVal<uint32_t>,
-        IntVal<int16_t>, IntVal<uint16_t>, IntVal<int8_t>, IntVal<uint8_t>,
-    > IntPsr;
+    namespace { // free function
+        template <class Int> IntVal<Int> local_int() noexcept { return std::make_shared<std::optional<Int>>(); }
+        template <class Int> IntVal<Int> local_int(Int v) noexcept { return std::make_shared<std::optional<Int>>(v); }
+    } // free function
 
     using PreDeclPsr     = std::shared_ptr<Parser>;
     using WeakPreDeclPsr = std::weak_ptr<Parser>;
@@ -844,7 +855,7 @@ namespace _LEXPARSER_SHELL
     struct Parser {
         typedef std::variant<UnbindPsr,
             StrPsr, CharSetPsr, SequencePsr, BranchPsr, LoopPsr, ActionPsr, NextNotPsr, FatalIfPsr, Scanner, NopPsr, LambdaPsr,
-            PreDeclPsr, WeakPreDeclPsr
+            PreDeclPsr, WeakPreDeclPsr, IntPsr
         > VariantParser;
 
     public:
@@ -959,8 +970,7 @@ namespace _LEXPARSER_SHELL
         }
 
         // CharRangePsr helper function
-        Parser operator()(const std::pair<char, char>& range) const
-        {
+        Parser operator()(const std::pair<char, char>& range) const {
             assert(std::get_if<CharSetPsr>(&unwrap().m_psr));
             auto copy = *this;
             std::get<CharSetPsr>(copy.unwrap().m_psr).AddMember(core::range_v, range);
@@ -1037,6 +1047,11 @@ namespace _LEXPARSER_SHELL
                     auto tmp = _psr.lock();
                     assert(nullptr != tmp);
                     return (ret = (*tmp)(script, len, offset, ctx, err));
+                }
+                else if constexpr (std::is_same<P, IntPsr>::value) {
+                    err = "IntPsr: ...";
+                    assert(((void)0, false));
+                    return (ret = ScanState::Fatal);
                 }
                 else {
                     if (ctx.IgnoreWhiteSpaces() && (!ctx.InWhiteSpacesPsr())) {
@@ -1216,6 +1231,7 @@ namespace _LEXPARSER_SHELL
         [[maybe_unused]] const Parser wss(Scanner(Parser::EatWss), "wss");          // wss 吃掉一批连续的白字符，永远成功
         [[maybe_unused]] const Parser utf8bom(StrPsr{ "\xEF\xBB\xBF" }, "utf8bom"); // UTF-8 编码的 BOM 头，通常这样使用：(utf8bom | epsilon), 或 ignore_utf8bom
         [[maybe_unused]] const Parser ignore_utf8bom(utf8bom | epsilon);            // 可表达 UTF-8 BOM 头允许被忽略的 psr
+        [[maybe_unused]] const Parser any_char = range(0, char(0xff));              // 任意单个字符，等价于正则表达式中的 /[\x00-\xff]/
 
         template <class Op, class Int1, class Int2,
             class = typename std::enable_if<details::IsInt<Int1>::value && details::IsInt<Int2>::value>::type>
@@ -1261,13 +1277,17 @@ namespace _LEXPARSER_SHELL
         // int 类型的双目运算
         template <class BinocularOperator, class Int1, class Int2>
         Parser int_op(BinocularOperator&& op, const Int1& left, const Int2& right) noexcept {
-            
+            return $curry([=]() {
+                return Parser(local_int(op(details::intrinsic_int(left), details::intrinsic_int(right))));
+            }).with_args();
         }
 
         // int 类型的单目运算
         template <class MoncularOperator, class Int>
         Parser int_op(MoncularOperator&& op, const Int& operand) noexcept {
-
+            return $curry([=]() {
+                return Parser(local_int(op(details::intrinsic_int(operand))));
+            }).with_args();
         }
 
         std::pair<bool, std::size_t> InvokeActions(core::Context& ctx, std::string& err) {
@@ -1281,11 +1301,5 @@ namespace _LEXPARSER_SHELL
             }
             return std::make_pair(sz == success_cnt, success_cnt);
         }
-
-        template <class Int>
-        IntVal<Int> local_int() noexcept { return std::make_shared<std::optional<Int>>(); }
-
-        template <class Int>
-        IntVal<Int> local_int(Int v) noexcept { return std::make_shared<std::optional<Int>>(v); }
     } // namespace  // free function
 } // namespace _LEXPARSER_SHELL
