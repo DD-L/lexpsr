@@ -806,9 +806,9 @@ namespace _LEXPARSER_SHELL
         Args m_args; // 携带的实参，从该函数递归执行 apply
     };
 
-    // struct IntPsr {}; // 表示数字的 psr , 兼容丘奇数与立即数 @TODO
     template <class Int, class = typename std::enable_if<std::is_integral<Int>::value>::type>
     using IntVal = std::shared_ptr<std::optional<Int>>;
+
     namespace details {
         template <class Val>
         using TraitValueType = typename Val::element_type::value_type;
@@ -831,6 +831,12 @@ namespace _LEXPARSER_SHELL
         template <class Int>
         static inline constexpr Int intrinsic_int(const IntVal<Int>& i) { return i->value(); }
     }
+
+    // struct IntPsr {}; // 表示数字的 psr , 兼容丘奇数与立即数 @TODO
+    typedef std::variant<
+        IntVal<int64_t>, IntVal<uint64_t>, IntVal<int32_t>, IntVal<uint32_t>,
+        IntVal<int16_t>, IntVal<uint16_t>, IntVal<int8_t>, IntVal<uint8_t>,
+    > IntPsr;
 
     using PreDeclPsr     = std::shared_ptr<Parser>;
     using WeakPreDeclPsr = std::weak_ptr<Parser>;
@@ -1250,6 +1256,18 @@ namespace _LEXPARSER_SHELL
         template <class Int1, class Int2>
         Parser le(const Int1& left, const Int2& right) noexcept { // <=
             return IntCmp(std::less_equal(), left, right);
+        }
+
+        // int 类型的双目运算
+        template <class BinocularOperator, class Int1, class Int2>
+        Parser int_op(BinocularOperator&& op, const Int1& left, const Int2& right) noexcept {
+            
+        }
+
+        // int 类型的单目运算
+        template <class MoncularOperator, class Int>
+        Parser int_op(MoncularOperator&& op, const Int& operand) noexcept {
+
         }
 
         std::pair<bool, std::size_t> InvokeActions(core::Context& ctx, std::string& err) {

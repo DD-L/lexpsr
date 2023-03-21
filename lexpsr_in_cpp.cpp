@@ -713,44 +713,46 @@ void test_as_int()
     std::cout << "-----------" << std::endl;
 }
 
-//void test_var_loop_cnt() {
-//    // 
-//    // xxx
-//    //
-//    using namespace lexpsr_shell;
-//
-//    auto ac = [](const ActionArgs& arg) {
-//        std::cout << arg.m_action_material.m_token.to_std_string() << std::endl;
-//        return true;
-//    };
-//
-//    decl_psr(loop) = $curry([&loop, ac](const Parser& cnt) -> Parser {
-//        psr(a) = range(0, char(0xff)) <<= ac;
-//        return le(cnt, 0) | (a, loop.with_args(cnt.plus(-1)));
-//    });
-//
-//    psr(ignore_to_end) = range(0, char(0xff))[any_cnt];
-//    psr(root) = (loop.with_args(Parser(local_int(5))), ignore_to_end);
-//
-//    core::Context ctx;
-//    std::size_t offset = 0;
-//    std::string err;
-//    std::string script("0123456789");
-//
-//    ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
-//    if (ScanState::OK != ss || script.size() != offset) {
-//        std::cerr << err << std::endl;
-//        std::cerr << ctx.ErrorPrompts(script) << std::endl;
-//    }
-//    else {
-//        assert(script.size() == offset);
-//        auto res = InvokeActions(ctx, err);
-//        if (!res.first) {
-//            std::cerr << err << std::endl;
-//        }
-//    }
-//    std::cout << "-----------" << std::endl;
-//}
+void test_var_loop_cnt() {
+    // 
+    // xxx
+    //
+    using namespace lexpsr_shell;
+
+    auto ac = [](const ActionArgs& arg) {
+        std::cout << arg.m_action_material.m_token.to_std_string() << std::endl;
+        return true;
+    };
+
+    decl_psr(loop) = $curry([&loop, ac](const Parser& cnt) -> Parser {
+        psr(a) = range(0, char(0xff)) <<= ac;
+        // return le(cnt, 0) | (a, loop.with_args(cnt.plus(-1)));
+        auto minus = [](auto v1, auto v2) { return v1 - v2; };
+        return le(cnt, 0) | (a, loop.with_args(int_op(minus, cnt, 1)));
+    });
+
+    psr(ignore_to_end) = range(0, char(0xff))[any_cnt];
+    psr(root) = (loop.with_args(Parser(local_int(5))), ignore_to_end);
+
+    core::Context ctx;
+    std::size_t offset = 0;
+    std::string err;
+    std::string script("0123456789");
+
+    ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
+    if (ScanState::OK != ss || script.size() != offset) {
+        std::cerr << err << std::endl;
+        std::cerr << ctx.ErrorPrompts(script) << std::endl;
+    }
+    else {
+        assert(script.size() == offset);
+        auto res = InvokeActions(ctx, err);
+        if (!res.first) {
+            std::cerr << err << std::endl;
+        }
+    }
+    std::cout << "-----------" << std::endl;
+}
 
 int main()
 {
