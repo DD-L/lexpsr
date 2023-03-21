@@ -730,7 +730,7 @@ void test_var_loop_cnt() {
         auto minus = [](auto v1, auto v2) { 
             return v1 - v2; 
         };
-        return le(cnt, 0) | (a, loop.with_args(int_op(minus, cnt, 1)));
+        return le(cnt.as_int(), 0) | (a, loop.with_args(int_op(minus, cnt.as_int(), 1).apply()));
     });
 
     psr(ignore_to_end) = any_char[any_cnt];
@@ -769,7 +769,7 @@ int main()
     test_with_args();
     test_friendly_error();
     test_as_int();
-    // test_var_loop_cnt();
+    test_var_loop_cnt();
 
     return 0;
 }

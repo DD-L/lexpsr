@@ -812,7 +812,7 @@ namespace _LEXPARSER_SHELL
     // struct IntPsr {}; // 表示数字的 psr , 兼容丘奇数与立即数 @TODO
     typedef std::variant<
         IntVal<int64_t>, IntVal<uint64_t>, IntVal<int32_t>, IntVal<uint32_t>,
-        IntVal<int16_t>, IntVal<uint16_t>, IntVal<int8_t>, IntVal<uint8_t>,
+        IntVal<int16_t>, IntVal<uint16_t>, IntVal<int8_t>, IntVal<uint8_t>
     > IntPsr;
 
     namespace details {
@@ -825,11 +825,20 @@ namespace _LEXPARSER_SHELL
         template <class Int>
         struct IsInt <IntVal<Int>> : std::true_type { typedef Int type; };
 
+        template <>
+        struct IsInt <IntPsr> : std::true_type { typedef IntPsr type; };
+
         template <class Int, class = std::enable_if_t<std::is_integral_v<std::decay_t<Int>>>>
         static inline constexpr bool valid_int(Int) { return true; }
 
         template <class Int>
         static inline constexpr bool valid_int(const IntVal<Int>& i) { return (i && i->has_value()); }
+
+        static inline constexpr bool valid_int(const IntPsr& i) { 
+            return std::visit([&i](auto&& v) {
+                return valid_int(v);
+            }, i);
+        }
 
         template <class Int, class = std::enable_if_t<std::is_integral_v<std::decay_t<Int>>>>
         static inline constexpr Int intrinsic_int(Int i) { return i; }
@@ -837,12 +846,12 @@ namespace _LEXPARSER_SHELL
         template <class Int>
         static inline constexpr Int intrinsic_int(const IntVal<Int>& i) { return i->value(); }
 
-        static inline decltype(auto) intrinsic_int(const IntPsr& i) {
+        static inline constexpr int64_t intrinsic_int(const IntPsr& i) {
             return std::visit([](auto&& v) {
-                return intrinsic_int(v);
+                return static_cast<int64_t>(intrinsic_int(v));
             }, i);
         }
-    }
+    } // namespace details
 
     namespace { // free function
         template <class Int> IntVal<Int> local_int() noexcept { return std::make_shared<std::optional<Int>>(); }
@@ -997,15 +1006,10 @@ namespace _LEXPARSER_SHELL
         Parser operator[](details::any_cnt_t) const { return (*this)[any_cnt()]; }
         Parser operator[](details::at_least_1_t) const { return (*this)[at_least_1()]; }
 
-        //template <class Int, class = std::enable_if_t<std::is_integral_v<Int>>>
-        //Parser plus(Int v) const {
-        //    assert(std::get_if<IntPsr>(&unwrap().m_psr));
-        //    auto copy = *this;
-        //    return Parser(LambdaPsr([v, copy](const Parser&) {
-        //        auto x = std::get<IntPsr>(copy.unwrap().m_psr).value() + v;
-        //        return Parser(local_int(x));
-        //    }));
-        //}
+        const IntPsr& as_int() const {
+            assert(std::get_if<IntPsr>(&(unwrap().m_psr)));
+            return std::get<IntPsr>((unwrap().m_psr));
+        }
 
         bool anonymous() const { return name().empty(); }
         const std::string& name() const { return m_name; }
@@ -1016,13 +1020,12 @@ namespace _LEXPARSER_SHELL
         }
 
         ScanState operator()(const char* script, std::size_t len, std::size_t& offset, core::Context& ctx, std::string& err) const {
-            ScanState ret = ScanState::Fatal;
-            std::visit([&](auto&& _psr) -> ScanState {
+            return std::visit([&](auto&& _psr) -> ScanState {
                 typedef typename std::decay<decltype(_psr)>::type P;
                 if constexpr (std::is_same<P, UnbindPsr>::value) {
                     err = "UnbindPsr: ...";
                     assert(((void)0, false));
-                    return (ret = ScanState::Fatal);
+                    return ScanState::Fatal;
                 }
                 else if constexpr (std::is_same<P, LambdaPsr>::value) {
                     if (!_psr.m_args.empty()) { // 非空意味着当前 Lambda 携带实参，需执行 apply
@@ -1034,24 +1037,24 @@ namespace _LEXPARSER_SHELL
                             psr_fn.set_name(func_name + std::to_string(i));
                             psr_fn = psr_fn.apply(*arg);
                         }
-                        return (ret = psr_fn(script, len, offset, ctx, err));
+                        return psr_fn(script, len, offset, ctx, err);
                     }
-                    return (ret = apply()(script, len, offset, ctx, err));
+                    return apply()(script, len, offset, ctx, err);
                 }
                 else if constexpr (std::is_same<P, PreDeclPsr>::value) {
                     assert(nullptr != _psr);
-                    return (ret = (*_psr)(script, len, offset, ctx, err));
+                    return (*_psr)(script, len, offset, ctx, err);
                 }
                 else if constexpr (std::is_same<P, WeakPreDeclPsr>::value) {
                     assert(!_psr.expired());
                     auto tmp = _psr.lock();
                     assert(nullptr != tmp);
-                    return (ret = (*tmp)(script, len, offset, ctx, err));
+                    return (*tmp)(script, len, offset, ctx, err);
                 }
                 else if constexpr (std::is_same<P, IntPsr>::value) {
                     err = "IntPsr: ...";
                     assert(((void)0, false));
-                    return (ret = ScanState::Fatal);
+                    return ScanState::Fatal;
                 }
                 else {
                     if (ctx.IgnoreWhiteSpaces() && (!ctx.InWhiteSpacesPsr())) {
@@ -1059,15 +1062,13 @@ namespace _LEXPARSER_SHELL
                         ctx.IgnoreWhiteSpaces()(script, len, offset, ctx, err);
                     }
                     std::size_t oldoffset = offset;
-                    ret = _psr(script, len, offset, ctx, err);
+                    ScanState ret = _psr(script, len, offset, ctx, err);
                     if (m_slice_callback && ScanState::OK == ret) {
                         m_slice_callback(core::StrRef{script + oldoffset, script + offset}); // @TODO 暂时不考虑脚本分段情况
                     }
                     return ret;
                 }
-            }, m_psr);
-
-            return ret;
+            }, m_psr); // end std::visit
         }
 
         Parser& unwrap() {
