@@ -835,7 +835,7 @@ namespace _LEXPARSER_SHELL
         static inline constexpr bool valid_int(const IntVal<Int>& i) { return (i && i->has_value()); }
 
         static inline constexpr bool valid_int(const IntPsr& i) { 
-            return std::visit([&i](auto&& v) {
+            return std::visit([](auto&& v) {
                 return valid_int(v);
             }, i);
         }
@@ -1237,12 +1237,12 @@ namespace _LEXPARSER_SHELL
         template <class Op, class Int1, class Int2,
             class = typename std::enable_if<details::IsInt<Int1>::value && details::IsInt<Int2>::value>::type>
         Parser IntCmp(Op&& op, const Int1& left, const Int2& right) {
-            return $curry([op, left, right]() {
+            //return $curry([op, left, right]() {
                 if (details::valid_int(left) && details::valid_int(right)) {
                     return op(details::intrinsic_int(left), details::intrinsic_int(right)) ? epsilon : _false;
                 }
                 return fatal_if(epsilon, "Unassigned integer variables"); // 有整数变量未赋值就使用
-            }).with_args();
+            //}).with_args();
         }
 
         template <class Int1, class Int2>
@@ -1278,17 +1278,17 @@ namespace _LEXPARSER_SHELL
         // int 类型的双目运算
         template <class BinocularOperator, class Int1, class Int2>
         Parser int_op(BinocularOperator&& op, const Int1& left, const Int2& right) noexcept {
-            return $curry([=]() {
+            //return $curry([=]() {
                 return Parser(local_int(op(details::intrinsic_int(left), details::intrinsic_int(right))));
-            }).with_args();
+            //}).with_args();
         }
 
         // int 类型的单目运算
         template <class MoncularOperator, class Int>
         Parser int_op(MoncularOperator&& op, const Int& operand) noexcept {
-            return $curry([=]() {
+            //return $curry([=]() {
                 return Parser(local_int(op(details::intrinsic_int(operand))));
-            }).with_args();
+            //}).with_args();
         }
 
         std::pair<bool, std::size_t> InvokeActions(core::Context& ctx, std::string& err) {

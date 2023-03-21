@@ -687,7 +687,12 @@ void test_as_int()
 
         auto int_a = local_int<int>();
         psr(c) = (a.slice_as_int(int_a), b);
-        return (c, (eq(int_a, 0) | loop.with_args()));
+        //return (c, (eq(int_a, 0) | loop.with_args()));
+
+        psr(cond) = $curry([=]() {
+            return eq(int_a, 0);
+        });
+        return (c, (cond | loop.with_args()));
     });
 
 
@@ -730,7 +735,8 @@ void test_var_loop_cnt() {
         auto minus = [](auto v1, auto v2) { 
             return v1 - v2; 
         };
-        return le(cnt.as_int(), 0) | (a, loop.with_args(int_op(minus, cnt.as_int(), 1).apply()));
+        //return le(cnt.as_int(), 0) | (a, loop.with_args(int_op(minus, cnt.as_int(), 1).apply()));
+        return le(cnt.as_int(), 0) | (a, loop.with_args(int_op(minus, cnt.as_int(), 1)));
     });
 
     psr(ignore_to_end) = any_char[any_cnt];
