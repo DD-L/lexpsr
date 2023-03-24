@@ -752,6 +752,583 @@ void test_as_int()
 //    std::cout << "-----------" << std::endl;
 //}
 
+class RegexAST final {
+    typedef _LEXPARSER_CORE::StrRef StrRef;
+public:
+    enum class NodeType {
+        Unknown = -1, Branch, Sequence, Loop, CharSet
+    };
+    struct LoopFlag {
+        std::pair<std::size_t, std::size_t> m_range { 0, 0 };
+        bool                                m_less { false };
+
+        LoopFlag() = default;
+        LoopFlag(const std::pair<std::size_t, std::size_t>& range, bool less) : m_range(range), m_less(less) {}
+    };
+    class CharSet;
+    union UnionData {
+        LoopFlag m_loop_flag;
+        CharSet* m_charset;
+
+        UnionData() : m_loop_flag(LoopFlag()) {}
+    };
+    struct Node {
+    public:
+        StrRef             m_context;
+        UnionData          m_union_data;
+        NodeType           m_type = NodeType::Unknown;
+        std::vector<Node*> m_member;
+
+    public:
+        Node(NodeType type, const StrRef& tok, UnionData union_data = UnionData()) : m_context(tok), m_union_data(union_data), m_type(type) {}
+    }; // struct Node
+
+    class CharSet final {
+        struct _Flag;
+    public:
+        static void NormalConstruct(_Flag&) {}
+        static void SingleCharConstruct(_Flag&, int) {}
+
+    private:
+        using _NormalType     = decltype(NormalConstruct);
+        using _SingleCharType = decltype(SingleCharConstruct);
+
+    public:
+        CharSet(_NormalType, bool negative_flag) : m_negative_flag(negative_flag), m_single_char_cached(false) {}
+
+        // 单字符集构造版本
+        CharSet(_SingleCharType, uint8_t single_char) : m_negative_flag(false), m_single_char(single_char), m_single_char_cached(false) {
+            SetPositiveFlag();
+            AddDiscrete(single_char);  // 这里会破坏 m_single_char_cached
+            m_single_char_cached = true;
+        }
+
+        CharSet(const CharSet&) = default;
+
+        CharSet& AddDiscrete(uint8_t c) noexcept {
+            m_single_char_cached = false;
+            m_bitset.set(c, true);
+            return *this;
+        }
+
+        CharSet& AddRange(uint8_t _min, uint8_t _max) noexcept {
+            m_single_char_cached = false;
+            if (_min > _max) { std::swap(_min, _max); }
+            for (std::size_t i = _min; i <= _max; ++i) { m_bitset.set(i, true); } // i 不能是 uint8_t 类型
+            return *this;
+        }
+
+        CharSet& ToCastless() {
+            const bool v = IsPositive();
+            using fn = int(*)(int);
+            auto trans = [this, v](char low, char high, fn castfn) {
+                for (std::size_t i = (std::size_t)low; i <= (std::size_t)high; ++i) {
+                    if (v == m_bitset.test(i)) {
+                        m_bitset.set((std::size_t)castfn((int)i), v);
+                        if (m_single_char_cached) { // 必定不再是 single_char 了
+                            m_single_char_cached = false;
+                        }
+                    }
+                }
+            };
+            trans('A', 'Z', (std::tolower));
+            trans('a', 'z', (std::toupper));
+            return *this;
+        }
+
+        // 判断是否是空字符集 []
+        bool IsNoneChar() const { return m_bitset.none(); }
+
+        // 返回是否是满域字符集
+        bool IsAnyChar() const {
+            if (IsNegative()) {
+                return IsNoneChar();
+            }
+            return m_bitset.all();
+        }
+
+        bool IsSingleChar() const { return 1u == Count(); }
+
+        bool SingleChar(uint8_t& c) const {
+            if (!IsSingleChar()) { return false; }
+            if (m_single_char_cached) {
+                c = m_single_char;
+            }
+            else { // 缓存无效
+                for (std::size_t i = 0; i < 256u; ++i) {
+                    bool bit = m_bitset.test(i);
+                    if (IsPositive() ? (bit) : (!bit)) {
+                        uint8_t target = (uint8_t)(i & 0xffu);
+                        c = target;
+                        // 更新缓存？？？ 不值得在更新缓存！会使得维护复杂度上升
+                        // m_single_char        = target;
+                        // m_single_char_cached = true;
+                    }
+                }
+            }
+
+            // assert(m_single_char_cached); // ??? @TODO 可以注释掉
+            return true;
+        }
+        // Count() 返回有效字符的个数
+        //   返回值为 0 （存疑?）、1 和 256 都有特殊含义
+        //   0:   表示空集 [], 这种情况在“词法解析”过程中就可以被无视的吃掉，但构图的时候也可以做一些兼容
+        //   1:   表示字符集只有一个，可以被优化成 \xnn,
+        //        进而多个连续的 \xnn 可以生成一个 StringGraph (但不太容易在 流模式 中使用)
+        //        此外， ??(是否值得?)?? 短一些的 StringGraph 可以不用 memcmp (比如平铺成： len >= x && \xnn == t[0] && \xnn' == t[1] && ...)
+        //   256: 表示 AnyChar
+        //        注意这三个模式串的 Graph 是同构的，甚至是完全相同的：
+        //        (1) /[^]*abc/
+        //        (2) /.*abc/s
+        //        (3) /[\x00-\xff]*abc/
+        std::size_t Count() const {
+            if (IsNegative()) {
+                return m_bitset.size() - m_bitset.count();
+            }
+            return m_bitset.count();
+        }
+
+        // 转换成正字符集
+        CharSet& ToPositive() noexcept {
+            if (IsNegative()) {
+                assert(false == m_single_char_cached);
+                SetPositiveFlag();
+                m_bitset.flip();
+            }
+            return *this;
+        }
+
+        void SetPositiveFlag() { m_negative_flag = false; }
+        void SetNegativeFlag() { m_negative_flag = true; }
+
+        bool IsPositive() const noexcept { return false == m_negative_flag; }
+        bool IsNegative() const noexcept { return !IsPositive(); }
+
+        // 合并两个字符集
+        CharSet& operator|=(CharSet&& that) noexcept {
+            if (this == &that) {
+                return *this;
+            }
+
+            m_single_char_cached = false; // 合并完成之后，缓存不再可靠
+            if (IsPositive() && that.IsPositive()) { // 都是正字符集是计算方式是并集
+                m_bitset |= that.m_bitset;
+                return *this;
+            }
+
+            if (IsNegative() && that.IsNegative()) { // 都是负字符集是计算方式是交集 <--- 这里要注意
+                m_bitset &= that.m_bitset;
+                return *this;
+            }
+
+            if (IsNegative()) { // 仅 this 是负字符集，转正字符集后再合并
+                return ToPositive() |= std::move(that);
+            }
+
+            // 仅 that 是负字符集, 转正字符集后再合并
+            return *this |= std::move(that.ToPositive());
+        }
+
+        template <class T, class V = std::nullptr_t>
+        void CalcSet(T&& arr, std::size_t size, V&& next_v, V&& default_v = nullptr) const {
+            assert(256u == size); (void)size;
+            assert(default_v != next_v);
+            auto&& true_value = IsPositive() ? next_v : default_v;
+            auto&& false_value = IsPositive() ? default_v : next_v;
+            for (std::size_t i = 0; i < 256u; ++i) {
+                arr[i] = m_bitset.test(i) ? true_value : false_value;
+            }
+        }
+
+        ~CharSet() {
+            m_bitset.reset();
+            m_negative_flag      = false;
+            m_single_char        = 0;
+            m_single_char_cached = false;
+        }
+
+    private:
+        std::bitset<256u>  m_bitset;
+        bool               m_negative_flag      = false; // 是否是“非字符集”； ^
+        uint8_t            m_single_char        = 0;     // 仅作为临时缓存使用
+        bool               m_single_char_cached = false; // single_char 缓存是否有效（可靠）
+    }; // class CharSet
+
+public:
+    RegexAST() = default;
+    RegexAST(const RegexAST&) = delete;
+    RegexAST& operator=(const RegexAST&) = delete;
+    ~RegexAST() {
+        for (Node* n : m_nodes_holder) { delete n; }
+        for (CharSet* cs : m_charset_holder) { delete cs; }
+    }
+
+public:
+    void SetRoot(Node* node) { m_root = node; }
+    const Node* Root() const { return m_root; }
+
+    template <class... Args>
+    Node* CreateNode(NodeType type, const StrRef& tok, CharSet* cs, Args&&... args) {
+        UnionData ud;
+        ud.m_charset = cs;
+        return CreateNode(type, tok, ud, std::forward<Args>(args)...);
+    }
+
+    template <class... Args>
+    Node* CreateNode(NodeType type, const StrRef& tok, LoopFlag loop_flag, Args&&... args) {
+        UnionData ud;
+        ud.m_loop_flag = loop_flag;
+        return CreateNode(type, tok, ud, std::forward<Args>(args)...);
+    }
+
+    template <class... Args>
+    Node* CreateNode(NodeType type, const StrRef& tok, Args&&... args) {
+        Node* node = new Node(type, tok, std::forward<Args>(args)...);
+        m_nodes_holder.push_back(node);
+        return node;
+    }
+
+    template <class... Args>
+    CharSet* _CreateCharSet(Args&&... args) {
+        CharSet* cs = new CharSet(std::forward<Args>(args)...);
+        m_charset_holder.push_back(cs);
+        return cs;
+    }
+
+    CharSet* CreateSingleCharSet(uint8_t single_char) {
+        return _CreateCharSet(CharSet::SingleCharConstruct, single_char);
+    }
+
+    CharSet* CreateNormalCharset(bool negative_flag) {
+        return _CreateCharSet(CharSet::NormalConstruct, negative_flag);
+    }
+
+private:
+    Node*                m_root = nullptr;
+    std::deque<Node*>    m_nodes_holder;
+    std::deque<CharSet*> m_charset_holder;
+}; // class RegexAST
+
+void test_regex() {
+    using namespace lexpsr_shell;
+
+    struct Context : core::Context {
+        void Reset() {
+            core::Context::Reset();
+
+            m_int_temp_in_lazy = 0;
+            m_int_num_stack.clear();
+            m_negative_flag_opt_stack.clear();
+            m_branch_cnt_stack.clear();
+            m_charset_content_stack.clear();
+            m_loop_less_opt_stack.clear();
+            m_loop_flag_opt_stack.clear();
+            m_loop_cnt_range.clear();
+            m_ast_charset_stack.clear();
+            m_ast_node_stack.clear();
+            m_global_modifiers = 0;
+        }
+
+        std::vector<std::size_t>    m_int_num_stack;
+        std::vector<std::size_t>    m_negative_flag_opt_stack;
+        std::vector<std::size_t>    m_branch_cnt_stack;
+        std::vector<std::size_t>    m_charset_content_stack;
+        std::vector<std::size_t>    m_loop_less_opt_stack; // 非贪婪标识
+        std::vector<std::size_t>    m_loop_flag_opt_stack; // 是否存在显式循环次数标识
+        std::vector<std::pair<std::size_t, std::size_t>> m_loop_cnt_range; // 循环次数
+
+        std::vector<RegexAST::CharSet*>    m_ast_charset_stack;
+        std::vector<RegexAST::Node*>       m_ast_node_stack;
+
+        RegexAST&                          m_ast;
+        uint32_t                           m_global_modifiers = 0;
+    }; // Context
+    static const auto Ctx = [](core::Context& ctx) { return static_cast<Context&>(ctx); };
+
+    ///////////////////////// actions ///////////////////
+    auto ac_char = [](const ActionArgs& args) {
+        const core::StrRef& tok = args.m_action_material.m_token;
+        assert(1u == tok.len);
+        auto&& ctx = Ctx(args.m_contex);
+        ctx.m_ast_charset_stack.push_back(ctx.m_ast.CreateSingleCharSet(tok[0]));
+        return true;
+    };
+
+    auto ac_hex = [](const ActionArgs& args) {
+        const core::StrRef& tok = args.m_action_material.m_token;
+        assert(4u == tok.len);
+        uint8_t first  = tok[0];
+        uint8_t second = tok[1];
+        auto xx = [](uint8_t c) -> uint8_t {
+            if ('0' <= c && c <= '9') { return c - '0'; }
+            if ('a' <= c && c <= 'f') { return c - 'a' + 10; }
+            assert('A' <= c && c <= 'F');
+            return c - 'A' + 10;
+        };
+        uint8_t res = (xx(first) << 4 | xx(second)) & 0xff;
+        auto&& ctx = Ctx(args.m_contex);
+        ctx.m_ast_charset_stack.push_back(ctx.m_ast.CreateSingleCharSet(res));
+        return true;
+    };
+
+    auto ac_escape_char_one_alpha = [](const ActionArgs& args) {
+        const core::StrRef& tok = args.m_action_material.m_token;
+        auto&& ctx = Ctx(args.m_contex);
+        assert(2u == tok.len);
+        assert('\\' == tok[0]);
+        RegexAST::CharSet* cs = ctx.m_ast.CreateNormalCharset(false);
+        assert(cs->IsPositive());
+        const uint8_t escape_char = tok[1];
+        switch (escape_char) { // @TODO 未与 psr 解耦
+            ///// 多字符集 ////
+        case 't': cs->AddDiscrete('\t'); break;
+        case 'n': cs->AddDiscrete('\n'); break;
+        case 'v': cs->AddDiscrete('\v'); break;
+        case 'f': cs->AddDiscrete('\f'); break;
+        case 'r': cs->AddDiscrete('\r'); break;
+        case '0': cs->AddDiscrete('\0'); break;
+        case 'D': cs->SetNegativeFlag(); // [[fallthrough]]
+        case 'd': cs->AddRange('0', '9'); break;
+        case 'S': cs->SetNegativeFlag(); // [[fallthrough]]
+        case 's': cs->AddDiscrete('\t').AddDiscrete('\n').AddDiscrete('\v').AddDiscrete('\f').AddDiscrete('\r').AddDiscrete(' '); break;
+        case 'W': cs->SetNegativeFlag(); // [[fallthrough]]
+        case 'w': cs->AddDiscrete('_').AddRange('0', '9').AddRange('a', 'z').AddRange('A', 'Z'); break;
+        default:
+            cs->~CharSet();
+            new (cs) RegexAST::CharSet(RegexAST::CharSet::SingleCharConstruct, escape_char);
+            assert(cs->IsPositive() && cs->IsSingleChar());
+            break;
+        }
+        ctx.m_ast_charset_stack.push_back(cs);
+        return true;
+    };
+
+    auto ac_char_range = [](const ActionArgs& args) {
+        const core::StrRef& tok = args.m_action_material.m_token;
+        auto&& ctx = Ctx(args.m_contex);
+        assert(ctx.m_ast_charset_stack.size() >= 2u);
+        RegexAST::CharSet* right = ctx.m_ast_charset_stack.back(); ctx.m_ast_charset_stack.pop_back();
+        RegexAST::CharSet* left = ctx.m_ast_charset_stack.back(); // ctx.m_ast_charset_stack.pop_back();
+
+        uint8_t _min = 0, _max = 0;
+        if (left->SingleChar(_min) && right->SingleChar(_max)) {
+            if (_min > _max) {
+                args.m_error_message = "Range out of order in character class : " + tok.to_std_string();
+                return false;
+            }
+
+            if (_min != _max) {
+                left->~CharSet();
+                new (left) RegexAST::CharSet(RegexAST::CharSet::NormalConstruct, false);
+                assert(left->IsPositive());
+                left->AddRange(_min, _max);
+            } // else if (_min == _max) 时等价与 [_min] 无需对 left 做任何变动
+            return true;
+        }
+        args.m_error_message = "logic_error: " + tok.to_std_string(); // 文件要求， [left-right] 必须时 SingleChar
+        return false;
+    };
+
+    auto ac_int_num = [](const ActionArgs& args) {
+        const core::StrRef& tok = args.m_action_material.m_token;
+        auto&& ctx = Ctx(args.m_contex);
+        assert(tok.data && tok.len >= 1u);
+
+        auto calc = [&ctx](uint8_t c) {
+            std::size_t old = ctx.m_int_temp_in_lazy;
+            ctx.m_int_temp_in_lazy = ctx.m_int_temp_in_lazy * 10u + (c - '0');
+            if (ctx.m_int_temp_in_lazy < old) {
+                return false;
+            }
+            return true;
+        };
+
+        for (std::size_t i = 0; i < tok.len; ++i) {
+            if (!calc((uint8_t)tok[i])) {
+                args.m_error_message = "int_num overflow: " + tok.to_std_string();
+                return false;
+            }
+        }
+        return true;
+    };
+
+    auto ac_negative_flag_opt = [](const ActionArgs& args) {
+        auto&& ctx = Ctx(args.m_contex);
+        std::size_t loop_cnt = args.m_action_material.m_scanner_info;
+        assert(loop_cnt <= 1u);
+        ctx.m_negative_flag_opt_stack.push_back(loop_cnt);
+        return true;
+    };
+
+    auto ac_not0x5d = [](const ActionArgs& args) {
+        const core::StrRef& tok = args.m_action_material.m_token;
+        auto&& ctx = Ctx(args.m_contex);
+        assert(1u == tok.len);
+        RegexAST::CharSet* cs = ctx.m_ast.CreateSingleCharSet(tok[0]);
+        ctx.m_ast_charset_stack.push_back(cs);
+        return true;
+    };
+
+    auto ac_charset_content = [](const ActionArgs& args) {
+        Ctx(args.m_contex).m_charset_content_stack.push_back(args.m_action_material.m_scanner_info); // loop_cnt
+        return true;
+    };
+
+    auto ac_charset = [](const ActionArgs& args) {
+#pragma warning(ac_charset)
+        return true;
+    };
+
+    auto ac_dot = [](const ActionArgs& args) {
+#pragma warning(ac_dot)
+        return true;
+    };
+
+    auto ac_literal = [](const ActionArgs& args) {
+#pragma warning(ac_literal)
+        return true;
+    };
+
+    auto ac_loop_less_opt = [](const ActionArgs& args) {
+#pragma warning(ac_loop_less_opt)
+        return true;
+    };
+
+    auto ac_loop_n = [](const ActionArgs& args) {
+#pragma warning(ac_loop_n)
+        return true;
+    };
+    auto ac_loop_mn = [](const ActionArgs& args) {
+#pragma warning(ac_loop_mn)
+        return true;
+    };
+    auto ac_loop_m_comma = [](const ActionArgs& args) {
+#pragma warning(ac_loop_m_comma)
+        return true;
+    };
+    auto ac_loop_comma_n = [](const ActionArgs& args) {
+#pragma warning(ac_loop_comma_n)
+        return true;
+    };
+    auto ac_loop_star = [](const ActionArgs& args) {
+#pragma warning(ac_loop_star)
+        return true;
+    };
+    auto ac_loop_plus = [](const ActionArgs& args) {
+#pragma warning(ac_loop_plus)
+        return true;
+    };
+    auto ac_question_mark = [](const ActionArgs& args) {
+#pragma warning(ac_question_mark)
+        return true;
+    };
+    auto ac_loop_flag_opt = [](const ActionArgs& args) {
+#pragma warning(ac_loop_flag_opt)
+        return true;
+    };
+    auto ac_loop = [](const ActionArgs& args) {
+#pragma warning(ac_loop)
+        return true;
+    };
+    auto ac_seq = [](const ActionArgs& args) {
+#pragma warning(ac_seq)
+        return true;
+    };
+    auto ac_branch = [](const ActionArgs& args) {
+#pragma warning(ac_branch)
+        return true;
+    };
+
+    /////////////////////////
+    //   
+    //  root          = branch;
+    //  branch        = seq ('|' seq); # 目前不允许空串
+    //  seq           = loop+;
+    //  loop          = (group | literal) loop_flag_opt;  # /a/ 等价与 /a{1}/
+    //  group         = '(' branch ')';
+    //  loop_flag_opt = loop_flag ?;
+    //  loop_flag     = ( '*' | '+' | '?' | loop_n | loop_mn | loop_m_comma | loop_comma_n ) loop_less_opt;
+    //  loop_less_opt = '?'?;
+    //  loop_n        = '{' int_num '}';
+    //  loop_mn       = '{' int_num ',' int_num '}';
+    //  loop_m_comma  = '{' int_num ',}';
+    //  loop_comma_n  = '{,' int_num '}';
+    //  int_num       = /[1-9][0-9]*|0/;
+    //  
+    //  literal       = charset | escape_char | digit | alpha | '.' | punct_char | fatal_if(loop_flag);
+    //  punct_char    = set(R"punct( -<>&:!"'#%,;=@_`~}])punct");  # 非元字符的标点符号，不能出现诸如 "*+?(){[" 等元字符，但注意："}]" 不属于元字符
+    //  chatset       = '[' negative_flag_opt charset_content ']'; # 注意： [^] 表示 [\x00-\xff], NoneOfEmpty; 而 [] 表示空字符集
+    //  negative_flag_opt   = '^'?;
+    //  charset_content     = (char_range | char_range_boundary)*;
+    //  char_range_boundary = escape_char | not0x5d;      # not0x5d 必须在最后，让前面短路它
+    //  not0x5d             = /[^\]]/;
+    //  
+    //  escape_char           = hex | escape_char_one_alpha;
+    //  escape_char_one_alpha = '\' set(
+    //                            "tnvfr0dDsSwW"                # 字符集（缩写）
+    //                            R"---(/\.^$*+?()[]{}|-)---"   # 原样输出
+    //                           ); # @TODO 解耦写法 _r : 'r' ... 但没必要
+    //  char_range            = char_range_boundary '-' char_range_boundary;   # 比如 [\x00-xff] 应当与 [\x00-x]|f 同构
+    //  hex   = $hex();
+    //  alpha = $alpha();
+    //  digit = $digit();
+    //
+    ///////////////////////// parser ////////////////////////
+    psr($digit) = range('0', '9');
+    psr($alpha) = range('a', 'z')('A', 'Z');
+    psr($hex)   = (R"(\x)"_psr, ($digit('a', 'f')('A', 'Z')[{2, 2}] | fatal_if(epsilon, "Illegal hexadecimal")));
+
+    psr(digit) = $digit <<= ac_char;
+    psr(alpha) = $alpha <<= ac_char;
+    psr(hex)   = $hex   <<= ac_hex;
+
+    psr(escape_char_one_alpha) = (R"(\)"_psr, (set("tnvfr0dDsSwW" R"---(/\.^$*+?()[]{}|-)---") | fatal_if(epsilon, "unsupported escape character"))) // 多字符集 & 原样输出
+                                 <<= ac_escape_char_one_alpha;
+
+    decl_psr(char_range_boundary);
+
+    psr(char_range)        = (char_range_boundary, "-"_psr, char_range_boundary)      <<= ac_char_range;
+    psr(int_num)           = ((range('1', '9'), range('0', '9')[any_cnt]) | "0"_psr)  <<= ac_int_num;
+    psr(negative_flag_opt) = "^"_psr[at_most_1]                                       <<= ac_negative_flag_opt; // ("^"_psr | epsilon) 可以省掉一个 stack @TODO
+    psr(punct_char)        = set(R"---( -<>&:!"'#%,;=@_`~}])---")                     <<= ac_char;
+    psr(not0x5d)           = negative_set("]")                                        <<= ac_not0x5d;
+    psr(escape_char)       = hex | escape_char_one_alpha;
+    char_range_boundary    = escape_char | not0x5d;
+
+    psr(charset_content)   = (char_range | char_range_boundary)[any_cnt]              <<= ac_charset_content;
+    psr(charset)           = ("["_psr, negative_flag_opt, charset_content, "]"_psr)   <<= ac_charset;
+
+    psr(dot) = "." <<= ac_dot;
+    decl_psr(fatal_nothing2repeat); // 绑定 loop_flag
+
+    psr(literal) = (charset | escape_char, digit, alpha, dot, punct_char, fatal_nothing2repeat) <<= ac_literal;
+
+    psr(loop_less_opt) = "?"_psr[at_most_1]                                                     <<= ac_loop_less_opt;
+    psr(loop_n)        = ("{"_psr, int_num, "}"_psr)                                            <<= ac_loop_n;
+    psr(loop_mn)       = ("{"_psr, int_num, ","_psr, int_num, "}"_psr)                          <<= ac_loop_mn;
+    psr(loop_m_comma)  = ("{"_psr, int_num, ",}"_psr)                                           <<= ac_loop_m_comma;
+    psr(loop_comma_n)  = ("{,"_psr, int_num, "}"_psr)                                           <<= ac_loop_comma_n;
+
+    psr(loop_star)     = "*" <<= ac_loop_star;
+    psr(loop_plus)     = "+" <<= ac_loop_plus;
+    psr(question_mark) = "?" <<= ac_question_mark;
+
+    psr(loop_flag) = ((loop_star | loop_plus | question_mark | loop_n | loop_mn | loop_m_comma | loop_comma_n), loop_less_opt);
+
+    fatal_nothing2repeat = fatal_if(loop_flag, "Nothing to repeat");
+    psr(loop_flag_opt) = loop_flag[at_most_1] <<= ac_loop_flag_opt;  // 这里可以实现成  loop_flag | epsilon 这样就可以省掉一个 stack @TODO
+
+    decl_psr(group);
+
+    psr(loop)   = ((group | literal), loop_flag_opt) <<= ac_loop;
+    psr(seq)    = loop[at_least_1]                   <<= ac_seq;
+    psr(branch) = (seq, ("|"_psr, seq)[any_cnt])     <<= ac_branch;
+
+    group = ("("_psr, branch, ")"_psr);
+
+    psr(root) = branch;
+} // test_regex
+
 int main()
 {
     test_core();
