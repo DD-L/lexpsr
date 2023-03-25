@@ -1426,7 +1426,7 @@ void test_regex() {
     ///////////////////////// parser ////////////////////////
     psr($digit) = range('0', '9');
     psr($alpha) = range('a', 'z')('A', 'Z');
-    psr($hex)   = (R"(\x)"_psr, ($digit('a', 'f')('A', 'Z')[{2, 2}] | fatal_if(epsilon, "Illegal hexadecimal")));
+    psr($hex)   = (R"(\x)"_psr, ($digit('a', 'f')('A', 'Z')[{2, 2}] | fatal_if(epsilon, "illegal hexadecimal")));
 
     psr(digit) = $digit <<= ac_char;
     psr(alpha) = $alpha <<= ac_char;
@@ -1465,7 +1465,7 @@ void test_regex() {
 
     psr(loop_flag) = ((loop_star | loop_plus | question_mark | loop_n | loop_mn | loop_m_comma | loop_comma_n), loop_less_opt);
 
-    fatal_nothing2repeat = fatal_if(loop_flag, "Nothing to repeat");
+    fatal_nothing2repeat = fatal_if(loop_flag, "nothing to repeat");
     psr(loop_flag_opt) = loop_flag[at_most_1] <<= ac_loop_flag_opt;  // 这里可以实现成  loop_flag | epsilon 这样就可以省掉一个 stack @TODO
 
     decl_psr(group);
