@@ -753,11 +753,11 @@ void test_as_int()
 //}
 
 namespace regex {
-    enum class Flag : uint32_t {
-        DEFAULT = 0,
-        CASELESS,    // i
-        LESS_MATCH,  // 非贪婪匹配
-        DOT_NOT_ALL, // . 不匹配所有， 与其他正则引擎不同，这里默认 ‘.’ 是匹配所有的
+    enum Flag : uint32_t {
+        DEFAULT     = 0,
+        CASELESS    = (1 << 0),    // i
+        LESS_MATCH  = (1 << 2),  // 非贪婪匹配
+        DOT_NOT_ALL = (1 << 3), // . 不匹配所有， 与其他正则引擎不同，这里默认 ‘.’ 是匹配所有的
     };
 
     class RegexAST final {
@@ -948,6 +948,15 @@ namespace regex {
                 }
             }
 
+            template <class H>
+            void PeekInsideInOrder(H&& h) const { // 按序窥视内部
+                for (std::size_t i = 0; i < m_bitset.size(); ++i) {
+                    const bool rawbit = m_bitset.test(i);
+                    const bool bit = IsPositive() ? rawbit : (!rawbit);
+                    h((uint8_t)i, bit);
+                }
+            }
+
             ~CharSet() {
                 m_bitset.reset();
                 m_negative_flag = false;
@@ -957,8 +966,8 @@ namespace regex {
 
         private:
             std::bitset<256u>  m_bitset;
-            bool               m_negative_flag = false; // 是否是“非字符集”； ^
-            uint8_t            m_single_char = 0;     // 仅作为临时缓存使用
+            bool               m_negative_flag = false;      // 是否是“非字符集”； ^
+            uint8_t            m_single_char   = 0;          // 仅作为临时缓存使用
             bool               m_single_char_cached = false; // single_char 缓存是否有效（可靠）
         }; // class CharSet
 
@@ -966,9 +975,14 @@ namespace regex {
         RegexAST() = default;
         RegexAST(const RegexAST&) = delete;
         RegexAST& operator=(const RegexAST&) = delete;
-        ~RegexAST() {
+        ~RegexAST() { Reset(); }
+
+        void Reset() {
+            m_root = nullptr;
             for (Node* n : m_nodes_holder) { delete n; }
             for (CharSet* cs : m_charset_holder) { delete cs; }
+            m_nodes_holder.clear();
+            m_charset_holder.clear();
         }
 
     public:
@@ -1012,10 +1026,121 @@ namespace regex {
         }
 
     private:
-        Node* m_root = nullptr;
+        Node*                m_root = nullptr;
         std::deque<Node*>    m_nodes_holder;
         std::deque<CharSet*> m_charset_holder;
     }; // class RegexAST
+
+    namespace details {
+        static inline std::string DumpCharSet(RegexAST::CharSet* cs) {
+            assert(nullptr != cs);
+
+            auto x = [](uint8_t c) -> char {
+                switch (c) {
+                case 0: return '0';  case 1: return '1';  case 2: return '2';  case 3: return '3';
+                case 4: return '4';  case 5: return '5';  case 6: return '6';  case 7: return '7';
+                case 8: return '8';  case 9: return '9';  case 0x0a: return 'a'; case 0x0b: return 'b';
+                case 0x0c: return 'c'; case 0x0d: return 'd'; case 0x0e: return 'e'; case 0x0f: return 'f';
+                default: assert(((void)0, false)); return '\0';
+                }
+            };
+
+            auto tostr = [&x](uint8_t c) {
+                if (std::isalnum(uint8_t(c))) {
+                    return std::string(1u, (char)c); // 数字和字母原样输出
+                }
+                std::string ret = "0x";
+                ret.push_back(x(uint8_t(c >> 4)));
+                ret.push_back(x(uint8_t(c & 0x0f)));
+                return ret;
+            };
+
+            std::string ret = R"({C:")";
+            uint8_t last = (uint8_t)0xff;
+            bool  overhang = false;
+            const std::size_t ret_origin_len = ret.size();
+            cs->PeekInsideInOrder([&](uint8_t c, bool bit) {
+                if (false == bit) { return; } // 只关心 true 即可
+                if (0 != c) {
+                    if (c == uint8_t(last + 1u)) { // 与上次连续, 更新和记录连续值
+                        if (0xffu != c) {
+                            last = c;
+                            overhang = true;
+                        }
+                        else { // the last one : 0xff
+                            ret += ("-" + tostr(c));
+                            overhang = false;
+                        }
+                        return;
+                    }
+
+                    if (overhang) { // 除 0xff 外，c 是连续的最后一个
+                        ret += ("-" + tostr(last) + "," + tostr(c)); // -tostr(last),tostr(c)
+                    }
+                    else { // 不连续
+                        if (ret.size() != ret_origin_len) { ret.push_back(','); } // 已经添加过就需要一个逗号隔开
+                        ret += tostr(c);
+                    }
+                    overhang = false; // 已经落地
+                    return;
+                }
+                last = c;        // assert(0 == c);
+                ret += tostr(c); // c == 0
+            }); // end cs->PeekInsideInOrder()
+            return (ret += R"("})");
+        } // DumpCharSet()
+
+        static inline std::string DumpNode(const RegexAST::Node* node) {
+            if (nullptr == node) { return ""; }
+
+            auto show_seq_branch_loop = [](std::string ret, const RegexAST::Node* node) {
+                assert(!node->m_member.empty());
+                for (std::size_t i = 0; i < node->m_member.size(); ++i) {
+                    const RegexAST::Node* mem = node->m_member[i];
+                    if (0 != i) {
+                        ret.push_back(',');
+                    }
+                    ret += DumpNode(mem);
+                }
+                return (ret += "]}");
+            };
+
+            switch (node->m_type) {
+            case RegexAST::RegexAST::NodeType::CharSet: {
+                return DumpCharSet(node->m_union_data.m_charset);
+            }
+            case RegexAST::RegexAST::NodeType::Branch: {
+                return show_seq_branch_loop("{B:[", node);
+            }
+            case RegexAST::RegexAST::NodeType::Sequence: {
+                return show_seq_branch_loop("{S:[", node);
+            }
+            case RegexAST::RegexAST::NodeType::Loop: {
+                const auto& loop_flag = node->m_union_data.m_loop_flag;
+                auto cnt_to_str = [](std::size_t cnt) -> std::string {
+                    if (_LEXPARSER_CORE::Loop::INF_CNT == cnt) {
+                        return "INF";
+                    }
+                    return std::to_string(cnt);
+                };
+                std::string min_cnt = cnt_to_str(loop_flag.m_range.first);
+                std::string max_cnt = cnt_to_str(loop_flag.m_range.second);
+                auto less_flag = loop_flag.m_less ? " less" : "";
+                return show_seq_branch_loop(R"("L )" + min_cnt + "," + max_cnt + less_flag + R"(":[)", node);
+            }
+            default:
+                assert(((void)0, false));
+                return "";
+            }
+        }
+    }
+
+    // S: Seq; B: Branch; L: Loop; C: CharSet
+    static inline std::string Dump(const RegexAST& ast) {
+        const RegexAST::Node* root = ast.Root();
+        if (nullptr != root) { return ""; }
+        return details::DumpNode(root);
+    }
 } // namespace regex
 
 void test_regex() {
@@ -1023,6 +1148,7 @@ void test_regex() {
     using namespace regex;
 
     struct Context : core::Context {
+        explicit Context(RegexAST& ast) : m_ast(ast) {}
         void Reset() {
             core::Context::Reset();
 
@@ -1037,6 +1163,15 @@ void test_regex() {
             m_ast_charset_stack.clear();
             m_ast_node_stack.clear();
             m_global_modifiers = 0;
+
+            m_ast.Reset();
+        }
+
+        void Finish() {
+            if (1u == m_ast_node_stack.size()) {
+                m_ast.SetRoot(m_ast_node_stack.back());
+            }
+            Reset();
         }
 
         std::vector<std::size_t>    m_int_num_stack;
@@ -1477,6 +1612,55 @@ void test_regex() {
     group = ("("_psr, branch, ")"_psr);
 
     psr(root) = branch;
+
+    ////////////////// end parser ///////////////////
+
+    regex::RegexAST ast;
+    Context ctx(ast);
+    std::size_t offset = 0;
+    std::string err;
+
+    auto reset = [&ctx, &offset, &err]() {
+        ctx.Reset();
+        offset = 0;
+        err.clear();
+    };
+
+    struct Case {
+        const char*    regex;
+        const uint32_t flag;
+        const char*    result;
+    };
+    // S: Seq; B: Branch; L: Loop; C: CharSet
+    std::vector<Case> correct_expressions = {
+        { "[abC123]",   0,    R"===({C:"1-3,C,a-b"})===" },
+    };
+
+    for (const Case& cs : correct_expressions) {
+        reset();
+        const std::string script(cs.regex);
+        ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
+        if (ScanState::OK != ss || script.size() != offset) {
+            std::cerr << err << std::endl;
+            std::cerr << ctx.ErrorPrompts(script) << std::endl;
+        }
+        else {
+            assert(script.size() == offset);
+            auto res = InvokeActions(ctx, err);
+            if (!res.first) {
+                std::cerr << err << std::endl;
+            }
+
+            assert(res.first);  // test !!!
+        }
+        assert(ScanState::OK == ss && script.size() == offset); // test !!!
+        ctx.Finish();
+        const std::string dump = regex::Dump(ast);
+        assert(dump == cs.result);  // test !!!
+    }
+
+    std::cout << "-----------" << std::endl;
+
 } // test_regex
 
 int main()
@@ -1493,6 +1677,6 @@ int main()
     test_friendly_error();
     test_as_int();
     // test_var_loop_cnt();
-
+    test_regex();
     return 0;
 }
