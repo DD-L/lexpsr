@@ -752,265 +752,275 @@ void test_as_int()
 //    std::cout << "-----------" << std::endl;
 //}
 
-class RegexAST final {
-    typedef _LEXPARSER_CORE::StrRef StrRef;
-public:
-    enum class NodeType {
-        Unknown = -1, Branch, Sequence, Loop, CharSet
+namespace regex {
+    enum class Flag : uint32_t {
+        DEFAULT = 0,
+        CASELESS,    // i
+        LESS_MATCH,  // 非贪婪匹配
+        DOT_NOT_ALL, // . 不匹配所有， 与其他正则引擎不同，这里默认 ‘.’ 是匹配所有的
     };
-    struct LoopFlag {
-        std::pair<std::size_t, std::size_t> m_range { 0, 0 };
-        bool                                m_less { false };
 
-        LoopFlag() = default;
-        LoopFlag(const std::pair<std::size_t, std::size_t>& range, bool less) : m_range(range), m_less(less) {}
-    };
-    class CharSet;
-    union UnionData {
-        LoopFlag m_loop_flag;
-        CharSet* m_charset;
-
-        UnionData() : m_loop_flag(LoopFlag()) {}
-    };
-    struct Node {
+    class RegexAST final {
+        typedef _LEXPARSER_CORE::StrRef StrRef;
     public:
-        StrRef             m_context;
-        UnionData          m_union_data;
-        NodeType           m_type = NodeType::Unknown;
-        std::vector<Node*> m_member;
+        enum class NodeType {
+            Unknown = -1, Branch, Sequence, Loop, CharSet
+        };
+        struct LoopFlag {
+            std::pair<std::size_t, std::size_t> m_range{ 0, 0 };
+            bool                                m_less{ false };
 
-    public:
-        Node(NodeType type, const StrRef& tok, UnionData union_data = UnionData()) : m_context(tok), m_union_data(union_data), m_type(type) {}
-    }; // struct Node
+            LoopFlag() = default;
+            LoopFlag(const std::pair<std::size_t, std::size_t>& range, bool less) : m_range(range), m_less(less) {}
+        };
+        class CharSet;
+        union UnionData {
+            LoopFlag m_loop_flag;
+            CharSet* m_charset;
 
-    class CharSet final {
-        struct _Flag;
-    public:
-        static void NormalConstruct(_Flag&) {}
-        static void SingleCharConstruct(_Flag&, int) {}
+            UnionData() : m_loop_flag(LoopFlag()) {}
+        };
+        struct Node {
+        public:
+            StrRef             m_context;
+            UnionData          m_union_data;
+            NodeType           m_type = NodeType::Unknown;
+            std::vector<Node*> m_member;
 
-    private:
-        using _NormalType     = decltype(NormalConstruct);
-        using _SingleCharType = decltype(SingleCharConstruct);
+        public:
+            Node(NodeType type, const StrRef& tok, UnionData union_data = UnionData()) : m_context(tok), m_union_data(union_data), m_type(type) {}
+        }; // struct Node
 
-    public:
-        CharSet(_NormalType, bool negative_flag) : m_negative_flag(negative_flag), m_single_char_cached(false) {}
+        class CharSet final {
+            struct _Flag;
+        public:
+            static void NormalConstruct(_Flag&) {}
+            static void SingleCharConstruct(_Flag&, int) {}
 
-        // 单字符集构造版本
-        CharSet(_SingleCharType, uint8_t single_char) : m_negative_flag(false), m_single_char(single_char), m_single_char_cached(false) {
-            SetPositiveFlag();
-            AddDiscrete(single_char);  // 这里会破坏 m_single_char_cached
-            m_single_char_cached = true;
-        }
+        private:
+            using _NormalType = decltype(NormalConstruct);
+            using _SingleCharType = decltype(SingleCharConstruct);
 
-        CharSet(const CharSet&) = default;
+        public:
+            CharSet(_NormalType, bool negative_flag) : m_negative_flag(negative_flag), m_single_char_cached(false) {}
 
-        CharSet& AddDiscrete(uint8_t c) noexcept {
-            m_single_char_cached = false;
-            m_bitset.set(c, true);
-            return *this;
-        }
+            // 单字符集构造版本
+            CharSet(_SingleCharType, uint8_t single_char) : m_negative_flag(false), m_single_char(single_char), m_single_char_cached(false) {
+                SetPositiveFlag();
+                AddDiscrete(single_char);  // 这里会破坏 m_single_char_cached
+                m_single_char_cached = true;
+            }
 
-        CharSet& AddRange(uint8_t _min, uint8_t _max) noexcept {
-            m_single_char_cached = false;
-            if (_min > _max) { std::swap(_min, _max); }
-            for (std::size_t i = _min; i <= _max; ++i) { m_bitset.set(i, true); } // i 不能是 uint8_t 类型
-            return *this;
-        }
+            CharSet(const CharSet&) = default;
 
-        CharSet& ToCastless() {
-            const bool v = IsPositive();
-            using fn = int(*)(int);
-            auto trans = [this, v](char low, char high, fn castfn) {
-                for (std::size_t i = (std::size_t)low; i <= (std::size_t)high; ++i) {
-                    if (v == m_bitset.test(i)) {
-                        m_bitset.set((std::size_t)castfn((int)i), v);
-                        if (m_single_char_cached) { // 必定不再是 single_char 了
-                            m_single_char_cached = false;
+            CharSet& AddDiscrete(uint8_t c) noexcept {
+                m_single_char_cached = false;
+                m_bitset.set(c, true);
+                return *this;
+            }
+
+            CharSet& AddRange(uint8_t _min, uint8_t _max) noexcept {
+                m_single_char_cached = false;
+                if (_min > _max) { std::swap(_min, _max); }
+                for (std::size_t i = _min; i <= _max; ++i) { m_bitset.set(i, true); } // i 不能是 uint8_t 类型
+                return *this;
+            }
+
+            CharSet& ToCastless() {
+                const bool v = IsPositive();
+                using fn = int(*)(int);
+                auto trans = [this, v](char low, char high, fn castfn) {
+                    for (std::size_t i = (std::size_t)low; i <= (std::size_t)high; ++i) {
+                        if (v == m_bitset.test(i)) {
+                            m_bitset.set((std::size_t)castfn((int)i), v);
+                            if (m_single_char_cached) { // 必定不再是 single_char 了
+                                m_single_char_cached = false;
+                            }
+                        }
+                    }
+                };
+                trans('A', 'Z', (std::tolower));
+                trans('a', 'z', (std::toupper));
+                return *this;
+            }
+
+            // 判断是否是空字符集 []
+            bool IsNoneChar() const { return m_bitset.none(); }
+
+            // 返回是否是满域字符集
+            bool IsAnyChar() const {
+                if (IsNegative()) {
+                    return IsNoneChar();
+                }
+                return m_bitset.all();
+            }
+
+            bool IsSingleChar() const { return 1u == Count(); }
+
+            bool SingleChar(uint8_t& c) const {
+                if (!IsSingleChar()) { return false; }
+                if (m_single_char_cached) {
+                    c = m_single_char;
+                }
+                else { // 缓存无效
+                    for (std::size_t i = 0; i < 256u; ++i) {
+                        bool bit = m_bitset.test(i);
+                        if (IsPositive() ? (bit) : (!bit)) {
+                            uint8_t target = (uint8_t)(i & 0xffu);
+                            c = target;
+                            // 更新缓存？？？ 不值得在更新缓存！会使得维护复杂度上升
+                            // m_single_char        = target;
+                            // m_single_char_cached = true;
                         }
                     }
                 }
-            };
-            trans('A', 'Z', (std::tolower));
-            trans('a', 'z', (std::toupper));
-            return *this;
-        }
 
-        // 判断是否是空字符集 []
-        bool IsNoneChar() const { return m_bitset.none(); }
-
-        // 返回是否是满域字符集
-        bool IsAnyChar() const {
-            if (IsNegative()) {
-                return IsNoneChar();
+                // assert(m_single_char_cached); // ??? @TODO 可以注释掉
+                return true;
             }
-            return m_bitset.all();
-        }
-
-        bool IsSingleChar() const { return 1u == Count(); }
-
-        bool SingleChar(uint8_t& c) const {
-            if (!IsSingleChar()) { return false; }
-            if (m_single_char_cached) {
-                c = m_single_char;
+            // Count() 返回有效字符的个数
+            //   返回值为 0 （存疑?）、1 和 256 都有特殊含义
+            //   0:   表示空集 [], 这种情况在“词法解析”过程中就可以被无视的吃掉，但构图的时候也可以做一些兼容
+            //   1:   表示字符集只有一个，可以被优化成 \xnn,
+            //        进而多个连续的 \xnn 可以生成一个 StringGraph (但不太容易在 流模式 中使用)
+            //        此外， ??(是否值得?)?? 短一些的 StringGraph 可以不用 memcmp (比如平铺成： len >= x && \xnn == t[0] && \xnn' == t[1] && ...)
+            //   256: 表示 AnyChar
+            //        注意这三个模式串的 Graph 是同构的，甚至是完全相同的：
+            //        (1) /[^]*abc/
+            //        (2) /.*abc/s
+            //        (3) /[\x00-\xff]*abc/
+            std::size_t Count() const {
+                if (IsNegative()) {
+                    return m_bitset.size() - m_bitset.count();
+                }
+                return m_bitset.count();
             }
-            else { // 缓存无效
+
+            // 转换成正字符集
+            CharSet& ToPositive() noexcept {
+                if (IsNegative()) {
+                    assert(false == m_single_char_cached);
+                    SetPositiveFlag();
+                    m_bitset.flip();
+                }
+                return *this;
+            }
+
+            void SetPositiveFlag() { m_negative_flag = false; }
+            void SetNegativeFlag() { m_negative_flag = true; }
+
+            bool IsPositive() const noexcept { return false == m_negative_flag; }
+            bool IsNegative() const noexcept { return !IsPositive(); }
+
+            // 合并两个字符集
+            CharSet& operator|=(CharSet&& that) noexcept {
+                if (this == &that) {
+                    return *this;
+                }
+
+                m_single_char_cached = false; // 合并完成之后，缓存不再可靠
+                if (IsPositive() && that.IsPositive()) { // 都是正字符集是计算方式是并集
+                    m_bitset |= that.m_bitset;
+                    return *this;
+                }
+
+                if (IsNegative() && that.IsNegative()) { // 都是负字符集是计算方式是交集 <--- 这里要注意
+                    m_bitset &= that.m_bitset;
+                    return *this;
+                }
+
+                if (IsNegative()) { // 仅 this 是负字符集，转正字符集后再合并
+                    return ToPositive() |= std::move(that);
+                }
+
+                // 仅 that 是负字符集, 转正字符集后再合并
+                return *this |= std::move(that.ToPositive());
+            }
+
+            template <class T, class V = std::nullptr_t>
+            void CalcSet(T&& arr, std::size_t size, V&& next_v, V&& default_v = nullptr) const {
+                assert(256u == size); (void)size;
+                assert(default_v != next_v);
+                auto&& true_value = IsPositive() ? next_v : default_v;
+                auto&& false_value = IsPositive() ? default_v : next_v;
                 for (std::size_t i = 0; i < 256u; ++i) {
-                    bool bit = m_bitset.test(i);
-                    if (IsPositive() ? (bit) : (!bit)) {
-                        uint8_t target = (uint8_t)(i & 0xffu);
-                        c = target;
-                        // 更新缓存？？？ 不值得在更新缓存！会使得维护复杂度上升
-                        // m_single_char        = target;
-                        // m_single_char_cached = true;
-                    }
+                    arr[i] = m_bitset.test(i) ? true_value : false_value;
                 }
             }
 
-            // assert(m_single_char_cached); // ??? @TODO 可以注释掉
-            return true;
-        }
-        // Count() 返回有效字符的个数
-        //   返回值为 0 （存疑?）、1 和 256 都有特殊含义
-        //   0:   表示空集 [], 这种情况在“词法解析”过程中就可以被无视的吃掉，但构图的时候也可以做一些兼容
-        //   1:   表示字符集只有一个，可以被优化成 \xnn,
-        //        进而多个连续的 \xnn 可以生成一个 StringGraph (但不太容易在 流模式 中使用)
-        //        此外， ??(是否值得?)?? 短一些的 StringGraph 可以不用 memcmp (比如平铺成： len >= x && \xnn == t[0] && \xnn' == t[1] && ...)
-        //   256: 表示 AnyChar
-        //        注意这三个模式串的 Graph 是同构的，甚至是完全相同的：
-        //        (1) /[^]*abc/
-        //        (2) /.*abc/s
-        //        (3) /[\x00-\xff]*abc/
-        std::size_t Count() const {
-            if (IsNegative()) {
-                return m_bitset.size() - m_bitset.count();
+            ~CharSet() {
+                m_bitset.reset();
+                m_negative_flag = false;
+                m_single_char = 0;
+                m_single_char_cached = false;
             }
-            return m_bitset.count();
-        }
 
-        // 转换成正字符集
-        CharSet& ToPositive() noexcept {
-            if (IsNegative()) {
-                assert(false == m_single_char_cached);
-                SetPositiveFlag();
-                m_bitset.flip();
-            }
-            return *this;
+        private:
+            std::bitset<256u>  m_bitset;
+            bool               m_negative_flag = false; // 是否是“非字符集”； ^
+            uint8_t            m_single_char = 0;     // 仅作为临时缓存使用
+            bool               m_single_char_cached = false; // single_char 缓存是否有效（可靠）
+        }; // class CharSet
+
+    public:
+        RegexAST() = default;
+        RegexAST(const RegexAST&) = delete;
+        RegexAST& operator=(const RegexAST&) = delete;
+        ~RegexAST() {
+            for (Node* n : m_nodes_holder) { delete n; }
+            for (CharSet* cs : m_charset_holder) { delete cs; }
         }
 
-        void SetPositiveFlag() { m_negative_flag = false; }
-        void SetNegativeFlag() { m_negative_flag = true; }
+    public:
+        void SetRoot(Node* node) { m_root = node; }
+        const Node* Root() const { return m_root; }
 
-        bool IsPositive() const noexcept { return false == m_negative_flag; }
-        bool IsNegative() const noexcept { return !IsPositive(); }
-
-        // 合并两个字符集
-        CharSet& operator|=(CharSet&& that) noexcept {
-            if (this == &that) {
-                return *this;
-            }
-
-            m_single_char_cached = false; // 合并完成之后，缓存不再可靠
-            if (IsPositive() && that.IsPositive()) { // 都是正字符集是计算方式是并集
-                m_bitset |= that.m_bitset;
-                return *this;
-            }
-
-            if (IsNegative() && that.IsNegative()) { // 都是负字符集是计算方式是交集 <--- 这里要注意
-                m_bitset &= that.m_bitset;
-                return *this;
-            }
-
-            if (IsNegative()) { // 仅 this 是负字符集，转正字符集后再合并
-                return ToPositive() |= std::move(that);
-            }
-
-            // 仅 that 是负字符集, 转正字符集后再合并
-            return *this |= std::move(that.ToPositive());
+        template <class... Args>
+        Node* CreateNode(NodeType type, const StrRef& tok, CharSet* cs, Args&&... args) {
+            UnionData ud;
+            ud.m_charset = cs;
+            return CreateNode(type, tok, ud, std::forward<Args>(args)...);
         }
 
-        template <class T, class V = std::nullptr_t>
-        void CalcSet(T&& arr, std::size_t size, V&& next_v, V&& default_v = nullptr) const {
-            assert(256u == size); (void)size;
-            assert(default_v != next_v);
-            auto&& true_value = IsPositive() ? next_v : default_v;
-            auto&& false_value = IsPositive() ? default_v : next_v;
-            for (std::size_t i = 0; i < 256u; ++i) {
-                arr[i] = m_bitset.test(i) ? true_value : false_value;
-            }
+        template <class... Args>
+        Node* CreateNode(NodeType type, const StrRef& tok, LoopFlag loop_flag, Args&&... args) {
+            UnionData ud;
+            ud.m_loop_flag = loop_flag;
+            return CreateNode(type, tok, ud, std::forward<Args>(args)...);
         }
 
-        ~CharSet() {
-            m_bitset.reset();
-            m_negative_flag      = false;
-            m_single_char        = 0;
-            m_single_char_cached = false;
+        template <class... Args>
+        Node* CreateNode(NodeType type, const StrRef& tok, Args&&... args) {
+            Node* node = new Node(type, tok, std::forward<Args>(args)...);
+            m_nodes_holder.push_back(node);
+            return node;
+        }
+
+        template <class... Args>
+        CharSet* _CreateCharSet(Args&&... args) {
+            CharSet* cs = new CharSet(std::forward<Args>(args)...);
+            m_charset_holder.push_back(cs);
+            return cs;
+        }
+
+        CharSet* CreateSingleCharSet(uint8_t single_char) {
+            return _CreateCharSet(CharSet::SingleCharConstruct, single_char);
+        }
+
+        CharSet* CreateNormalCharSet(bool negative_flag) {
+            return _CreateCharSet(CharSet::NormalConstruct, negative_flag);
         }
 
     private:
-        std::bitset<256u>  m_bitset;
-        bool               m_negative_flag      = false; // 是否是“非字符集”； ^
-        uint8_t            m_single_char        = 0;     // 仅作为临时缓存使用
-        bool               m_single_char_cached = false; // single_char 缓存是否有效（可靠）
-    }; // class CharSet
-
-public:
-    RegexAST() = default;
-    RegexAST(const RegexAST&) = delete;
-    RegexAST& operator=(const RegexAST&) = delete;
-    ~RegexAST() {
-        for (Node* n : m_nodes_holder) { delete n; }
-        for (CharSet* cs : m_charset_holder) { delete cs; }
-    }
-
-public:
-    void SetRoot(Node* node) { m_root = node; }
-    const Node* Root() const { return m_root; }
-
-    template <class... Args>
-    Node* CreateNode(NodeType type, const StrRef& tok, CharSet* cs, Args&&... args) {
-        UnionData ud;
-        ud.m_charset = cs;
-        return CreateNode(type, tok, ud, std::forward<Args>(args)...);
-    }
-
-    template <class... Args>
-    Node* CreateNode(NodeType type, const StrRef& tok, LoopFlag loop_flag, Args&&... args) {
-        UnionData ud;
-        ud.m_loop_flag = loop_flag;
-        return CreateNode(type, tok, ud, std::forward<Args>(args)...);
-    }
-
-    template <class... Args>
-    Node* CreateNode(NodeType type, const StrRef& tok, Args&&... args) {
-        Node* node = new Node(type, tok, std::forward<Args>(args)...);
-        m_nodes_holder.push_back(node);
-        return node;
-    }
-
-    template <class... Args>
-    CharSet* _CreateCharSet(Args&&... args) {
-        CharSet* cs = new CharSet(std::forward<Args>(args)...);
-        m_charset_holder.push_back(cs);
-        return cs;
-    }
-
-    CharSet* CreateSingleCharSet(uint8_t single_char) {
-        return _CreateCharSet(CharSet::SingleCharConstruct, single_char);
-    }
-
-    CharSet* CreateNormalCharset(bool negative_flag) {
-        return _CreateCharSet(CharSet::NormalConstruct, negative_flag);
-    }
-
-private:
-    Node*                m_root = nullptr;
-    std::deque<Node*>    m_nodes_holder;
-    std::deque<CharSet*> m_charset_holder;
-}; // class RegexAST
+        Node* m_root = nullptr;
+        std::deque<Node*>    m_nodes_holder;
+        std::deque<CharSet*> m_charset_holder;
+    }; // class RegexAST
+} // namespace regex
 
 void test_regex() {
     using namespace lexpsr_shell;
+    using namespace regex;
 
     struct Context : core::Context {
         void Reset() {
@@ -1076,7 +1086,7 @@ void test_regex() {
         auto&& ctx = Ctx(args.m_contex);
         assert(2u == tok.len);
         assert('\\' == tok[0]);
-        RegexAST::CharSet* cs = ctx.m_ast.CreateNormalCharset(false);
+        RegexAST::CharSet* cs = ctx.m_ast.CreateNormalCharSet(false);
         assert(cs->IsPositive());
         const uint8_t escape_char = tok[1];
         switch (escape_char) { // @TODO 未与 psr 解耦
@@ -1175,67 +1185,207 @@ void test_regex() {
     };
 
     auto ac_charset = [](const ActionArgs& args) {
-#pragma warning(ac_charset)
+        auto&& ctx = Ctx(args.m_contex);
+        assert(!ctx.m_negative_flag_opt_stack.empty());
+        assert(!ctx.m_charset_content_stack.empty());
+
+        bool negative_flag = (0 != ctx.m_negative_flag_opt_stack.back()); // 是否存在负字符集
+        ctx.m_negative_flag_opt_stack.pop_back();
+
+        std::size_t content_cnt = ctx.m_charset_content_stack.back(); ctx.m_charset_content_stack.pop_back();
+        assert(content_cnt <= ctx.m_ast_charset_stack.size());
+        if (0 == content_cnt) { // [] or [^]
+            assert(ctx.m_ast_charset_stack.empty());
+            RegexAST::CharSet* cs = ctx.m_ast.CreateNormalCharSet(negative_flag);
+            ctx.m_ast_charset_stack.push_back(cs);
+            return true;
+        }
+
+        assert(!ctx.m_ast_charset_stack.empty());
+        std::size_t charset_stack_fitsize = ctx.m_ast_charset_stack.size() - content_cnt;
+        auto iter = ctx.m_ast_charset_stack.begin();
+        RegexAST::CharSet* cs = *iter++;
+
+        for (; iter != ctx.m_ast_charset_stack.end(); ++iter) {
+            *cs |= std::move(**iter);
+        }
+        assert(ctx.m_ast_charset_stack.size() >= charset_stack_fitsize + 1u);
+        ctx.m_ast_charset_stack.resize(charset_stack_fitsize + 1u);
+
+        if (negative_flag) {
+            if (cs->IsPositive()) {
+                cs->SetNegativeFlag();
+            }
+            else {
+                cs->SetPositiveFlag();
+            }
+        }
+
         return true;
     };
 
     auto ac_dot = [](const ActionArgs& args) {
-#pragma warning(ac_dot)
+        auto&& ctx = Ctx(args.m_contex);
+        RegexAST::CharSet* cs = ctx.m_ast.CreateNormalCharSet(true);
+        assert(cs->IsNegative() && cs->IsAnyChar());
+        if (ctx.m_global_modifiers & (uint32_t)Flag::DOT_NOT_ALL) {
+            cs->AddDiscrete('\r').AddDiscrete('\n');
+        }
+        // 默认“点”是匹配所有字符（与其他正则引擎不同）
+        ctx.m_ast_charset_stack.push_back(cs);
         return true;
     };
 
     auto ac_literal = [](const ActionArgs& args) {
-#pragma warning(ac_literal)
+        const core::StrRef& tok = args.m_action_material.m_token;
+        auto&& ctx = Ctx(args.m_contex);
+        RegexAST::CharSet* cs = ctx.m_ast_charset_stack.back(); ctx.m_ast_charset_stack.pop_back();
+        if (ctx.m_global_modifiers & (uint32_t)Flag::CASELESS) {
+            cs->ToCastless();
+        }
+        RegexAST::Node* node = ctx.m_ast.CreateNode(RegexAST::NodeType::CharSet, tok, cs);
+        ctx.m_ast_node_stack.push_back(node);
         return true;
     };
 
     auto ac_loop_less_opt = [](const ActionArgs& args) {
-#pragma warning(ac_loop_less_opt)
+        auto&& ctx = Ctx(args.m_contex);
+        std::size_t loop_cnt = args.m_action_material.m_scanner_info;
+        assert(loop_cnt <= 1u);
+        if (ctx.m_global_modifiers & (uint32_t)Flag::LESS_MATCH) { // 全局非贪婪匹配
+            ctx.m_loop_less_opt_stack.push_back(1u);
+        }
+        else {
+            ctx.m_loop_less_opt_stack.push_back(0);
+        }
         return true;
     };
 
     auto ac_loop_n = [](const ActionArgs& args) {
-#pragma warning(ac_loop_n)
+        auto&& ctx = Ctx(args.m_contex);
+        assert(ctx.m_int_num_stack.size() >= 1u);
+        std::size_t n = ctx.m_int_num_stack.back(); ctx.m_int_num_stack.pop_back();
+        ctx.m_loop_cnt_range.emplace_back(n, n);
         return true;
     };
     auto ac_loop_mn = [](const ActionArgs& args) {
-#pragma warning(ac_loop_mn)
+        auto&& ctx = Ctx(args.m_contex);
+        assert(ctx.m_int_num_stack.size() >= 2u);
+        std::size_t n = ctx.m_int_num_stack.back(); ctx.m_int_num_stack.pop_back();
+        std::size_t m = ctx.m_int_num_stack.back(); ctx.m_int_num_stack.pop_back();
+        if (m > n) { // 这个判断过程可以转移到 lexpsr 层面解决（它现在有这个表达能力）
+            const core::StrRef& tok = args.m_action_material.m_token;
+            args.m_error_message = tok.to_std_string() + " : numbers out of order in {} quantifier";
+            return false;
+        }
+        ctx.m_loop_cnt_range.emplace_back(m, n);
         return true;
     };
     auto ac_loop_m_comma = [](const ActionArgs& args) {
-#pragma warning(ac_loop_m_comma)
+        auto&& ctx = Ctx(args.m_contex);
+        assert(ctx.m_int_num_stack.size() >= 1u);
+        std::size_t m = ctx.m_int_num_stack.back(); ctx.m_int_num_stack.pop_back();
+        ctx.m_loop_cnt_range.emplace_back(m, core::Loop::INF_CNT);
         return true;
     };
     auto ac_loop_comma_n = [](const ActionArgs& args) {
-#pragma warning(ac_loop_comma_n)
+        auto&& ctx = Ctx(args.m_contex);
+        assert(ctx.m_int_num_stack.size() >= 1u);
+        std::size_t n = ctx.m_int_num_stack.back(); ctx.m_int_num_stack.pop_back();
+        ctx.m_loop_cnt_range.emplace_back(0, n);
         return true;
     };
     auto ac_loop_star = [](const ActionArgs& args) {
-#pragma warning(ac_loop_star)
+        Ctx(args.m_contex).m_loop_cnt_range.emplace_back(0, core::Loop::INF_CNT);
         return true;
     };
     auto ac_loop_plus = [](const ActionArgs& args) {
-#pragma warning(ac_loop_plus)
+        Ctx(args.m_contex).m_loop_cnt_range.emplace_back(1u, core::Loop::INF_CNT);
         return true;
     };
     auto ac_question_mark = [](const ActionArgs& args) {
-#pragma warning(ac_question_mark)
+        Ctx(args.m_contex).m_loop_cnt_range.emplace_back(0, 1u);
         return true;
     };
     auto ac_loop_flag_opt = [](const ActionArgs& args) {
-#pragma warning(ac_loop_flag_opt)
+        std::size_t loop_cnt = args.m_action_material.m_scanner_info;
+        assert(loop_cnt <= 1u);
+        auto&& ctx = Ctx(args.m_contex);
+        ctx.m_loop_flag_opt_stack.push_back(loop_cnt);
         return true;
     };
     auto ac_loop = [](const ActionArgs& args) {
-#pragma warning(ac_loop)
+        auto&& ctx = Ctx(args.m_contex);
+        bool less = false; // 默认贪婪
+        std::pair<std::size_t, std::size_t> loop_cnt_range = { 1, 1 };
+        bool implicit_cnt = (0 != ctx.m_loop_flag_opt_stack.back()); ctx.m_loop_flag_opt_stack.pop_back();
+        if (implicit_cnt) { // 显式书写了循环次数
+            assert(!ctx.m_loop_cnt_range.empty() && !ctx.m_loop_less_opt_stack.empty());
+            less = !!(ctx.m_loop_less_opt_stack.back()); ctx.m_loop_less_opt_stack.pop_back();
+            loop_cnt_range = ctx.m_loop_cnt_range.back(); ctx.m_loop_cnt_range.pop_back();
+        }
+
+        bool left_eq_right_range = loop_cnt_range.first == loop_cnt_range.second;
+        // 移除了 循环中判断 group 的设计后，可以放心的将 loop 也最小化了
+        if (left_eq_right_range && 1u == loop_cnt_range.first) { // 最小化 loop
+            return true;
+        }
+
+        // 循环体
+        RegexAST::Node* body = ctx.m_ast_node_stack.back(); ctx.m_ast_node_stack.pop_back();
+        RegexAST::Node* node = ctx.m_ast.CreateNode(RegexAST::NodeType::Loop, args.m_action_material.m_token);
+        if (left_eq_right_range && less) { // 这四种情况是同构的： {n,n}? <=> {n}? <=> {n.n} <=> {n}
+            less = false; // 取最简单的（默认状态）: {n}
+        }
+
+        node->m_union_data.m_loop_flag = RegexAST::LoopFlag(loop_cnt_range, less);
+        node->m_member.push_back(body);
+
+        ctx.m_ast_node_stack.push_back(node);
         return true;
     };
     auto ac_seq = [](const ActionArgs& args) {
-#pragma warning(ac_seq)
+        const core::StrRef& tok = args.m_action_material.m_token;
+        auto&& ctx = Ctx(args.m_contex);
+        std::size_t loop_cnt = args.m_action_material.m_scanner_info;
+        assert(ctx.m_ast_node_stack.size() >= loop_cnt && loop_cnt >= 1u);
+        if (1u == loop_cnt) { // 最小化
+            ctx.m_ast_node_stack.back()->m_context = tok;
+            return true;
+        }
+        std::size_t hold_cnt = ctx.m_ast_node_stack.size() - loop_cnt;
+        RegexAST::Node* node = ctx.m_ast.CreateNode(RegexAST::NodeType::Sequence, tok);
+
+        // add member
+        node->m_member.insert(node->m_member.end(), ctx.m_ast_node_stack.begin() + hold_cnt, ctx.m_ast_node_stack.end());
+        ctx.m_ast_node_stack.resize(hold_cnt);
+        ctx.m_ast_node_stack.push_back(node);
         return true;
     };
+
+    auto ac_branch_follow_up = [](const ActionArgs& args) {
+        std::size_t loop_cnt = args.m_action_material.m_scanner_info;
+        Ctx(args.m_contex).m_branch_cnt_stack.push_back(loop_cnt);
+        return true;
+    };
+
     auto ac_branch = [](const ActionArgs& args) {
-#pragma warning(ac_branch)
+        const core::StrRef& tok = args.m_action_material.m_token;
+        auto&& ctx = Ctx(args.m_contex);
+        assert(!ctx.m_branch_cnt_stack.empty());
+        std::size_t branch_cnt = ctx.m_branch_cnt_stack.back(); ctx.m_branch_cnt_stack.pop_back();
+        if (1u == branch_cnt) { // 最小化
+            ctx.m_ast_node_stack.back()->m_context = tok;
+            return true;
+        }
+
+        std::size_t hold_cnt = ctx.m_ast_node_stack.size() - branch_cnt;
+        RegexAST::Node* node = ctx.m_ast.CreateNode(RegexAST::NodeType::Branch, tok);
+
+        // add member
+        node->m_member.insert(node->m_member.end(), ctx.m_ast_node_stack.begin() + hold_cnt, ctx.m_ast_node_stack.end());
+        ctx.m_ast_node_stack.resize(hold_cnt);
+        ctx.m_ast_node_stack.push_back(node);
         return true;
     };
 
@@ -1320,9 +1470,9 @@ void test_regex() {
 
     decl_psr(group);
 
-    psr(loop)   = ((group | literal), loop_flag_opt) <<= ac_loop;
-    psr(seq)    = loop[at_least_1]                   <<= ac_seq;
-    psr(branch) = (seq, ("|"_psr, seq)[any_cnt])     <<= ac_branch;
+    psr(loop)   = ((group | literal), loop_flag_opt)                       <<= ac_loop;
+    psr(seq)    = loop[at_least_1]                                         <<= ac_seq;
+    psr(branch) = (seq, ("|"_psr, seq)[any_cnt] <<= ac_branch_follow_up)   <<= ac_branch;
 
     group = ("("_psr, branch, ")"_psr);
 
