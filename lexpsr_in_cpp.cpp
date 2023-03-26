@@ -1064,13 +1064,9 @@ namespace regex {
                 if (0 != c) {
                     if (c == uint8_t(last + 1u)) { // 与上次连续, 更新和记录连续值
                         if (0xffu != c) {
-                            last = c;
                             overhang = true;
                         }
-                        else { // the last one : 0xff
-                            ret += ("-" + tostr(c));
-                            overhang = false;
-                        }
+                        last = c;
                         return;
                     }
 
@@ -1081,12 +1077,17 @@ namespace regex {
                         if (ret.size() != ret_origin_len) { ret.push_back(','); } // 已经添加过就需要一个逗号隔开
                         ret += tostr(c);
                     }
+                    last = c;
                     overhang = false; // 已经落地
                     return;
                 }
                 last = c;        // assert(0 == c);
                 ret += tostr(c); // c == 0
             }); // end cs->PeekInsideInOrder()
+
+            if (overhang) { // last 是连续的最后一个, 包括 0xff
+                ret += ("-" + tostr(last)); // -tostr(last)
+            }
             return (ret += R"("})");
         } // DumpCharSet()
 
@@ -1138,7 +1139,7 @@ namespace regex {
     // S: Seq; B: Branch; L: Loop; C: CharSet
     static inline std::string Dump(const RegexAST& ast) {
         const RegexAST::Node* root = ast.Root();
-        if (nullptr != root) { return ""; }
+        if (nullptr == root) { return ""; }
         return details::DumpNode(root);
     }
 } // namespace regex
@@ -1167,11 +1168,13 @@ void test_regex() {
             m_ast.Reset();
         }
 
-        void Finish() {
+        bool Finish() {
             if (1u == m_ast_node_stack.size()) {
-                m_ast.SetRoot(m_ast_node_stack.back());
+                m_ast.SetRoot(m_ast_node_stack.back()); 
+                m_ast_node_stack.pop_back();
+                return true;
             }
-            Reset();
+            return false;
         }
 
         std::vector<std::size_t>    m_int_num_stack;
@@ -1188,7 +1191,7 @@ void test_regex() {
         RegexAST&                          m_ast;
         uint32_t                           m_global_modifiers = 0;
     }; // Context
-    static const auto Ctx = [](core::Context& ctx) { return static_cast<Context&>(ctx); };
+    static const auto Ctx = [](core::Context& ctx) -> Context& { return static_cast<Context&>(ctx); };
 
     ///////////////////////// actions ///////////////////
     auto ac_char = [](const ActionArgs& args) {
@@ -1488,7 +1491,8 @@ void test_regex() {
             ctx.m_ast_node_stack.back()->m_context = tok;
             return true;
         }
-        std::size_t hold_cnt = ctx.m_ast_node_stack.size() - loop_cnt;
+        assert(ctx.m_ast_node_stack.size() >= loop_cnt);
+        const std::size_t hold_cnt = ctx.m_ast_node_stack.size() - loop_cnt;
         RegexAST::Node* node = ctx.m_ast.CreateNode(RegexAST::NodeType::Sequence, tok);
 
         // add member
@@ -1513,8 +1517,11 @@ void test_regex() {
             ctx.m_ast_node_stack.back()->m_context = tok;
             return true;
         }
-
-        std::size_t hold_cnt = ctx.m_ast_node_stack.size() - branch_cnt;
+        if (0 == branch_cnt) {  // ???
+            return true;
+        }
+        assert(ctx.m_ast_node_stack.size() >= branch_cnt);
+        const std::size_t hold_cnt = ctx.m_ast_node_stack.size() - branch_cnt;
         RegexAST::Node* node = ctx.m_ast.CreateNode(RegexAST::NodeType::Branch, tok);
 
         // add member
@@ -1527,7 +1534,7 @@ void test_regex() {
     /////////////////////////
     //   
     //  root          = branch;
-    //  branch        = seq ('|' seq); # 目前不允许空串
+    //  branch        = seq ('|' seq)*; # 目前不允许空串
     //  seq           = loop+;
     //  loop          = (group | literal) loop_flag_opt;  # /a/ 等价与 /a{1}/
     //  group         = '(' branch ')';
@@ -1586,13 +1593,13 @@ void test_regex() {
     psr(dot) = "." <<= ac_dot;
     decl_psr(fatal_nothing2repeat); // 绑定 loop_flag
 
-    psr(literal) = (charset | escape_char, digit, alpha, dot, punct_char, fatal_nothing2repeat) <<= ac_literal;
+    psr(literal) = (charset | escape_char | digit | alpha | dot | punct_char | fatal_nothing2repeat) <<= ac_literal;
 
-    psr(loop_less_opt) = "?"_psr[at_most_1]                                                     <<= ac_loop_less_opt;
-    psr(loop_n)        = ("{"_psr, int_num, "}"_psr)                                            <<= ac_loop_n;
-    psr(loop_mn)       = ("{"_psr, int_num, ","_psr, int_num, "}"_psr)                          <<= ac_loop_mn;
-    psr(loop_m_comma)  = ("{"_psr, int_num, ",}"_psr)                                           <<= ac_loop_m_comma;
-    psr(loop_comma_n)  = ("{,"_psr, int_num, "}"_psr)                                           <<= ac_loop_comma_n;
+    psr(loop_less_opt) = "?"_psr[at_most_1]                                                          <<= ac_loop_less_opt;
+    psr(loop_n)        = ("{"_psr, int_num, "}"_psr)                                                 <<= ac_loop_n;
+    psr(loop_mn)       = ("{"_psr, int_num, ","_psr, int_num, "}"_psr)                               <<= ac_loop_mn;
+    psr(loop_m_comma)  = ("{"_psr, int_num, ",}"_psr)                                                <<= ac_loop_m_comma;
+    psr(loop_comma_n)  = ("{,"_psr, int_num, "}"_psr)                                                <<= ac_loop_comma_n;
 
     psr(loop_star)     = "*" <<= ac_loop_star;
     psr(loop_plus)     = "+" <<= ac_loop_plus;
