@@ -1614,7 +1614,6 @@ void test_regex() {
     psr(branch) = (seq, ("|"_psr, seq)[any_cnt] <<= ac_branch_follow_up)   <<= ac_branch;
 
     group = ("("_psr, branch, ")"_psr);
-
     psr(root) = branch;
 
     ////////////////// end parser ///////////////////
@@ -1690,15 +1689,16 @@ void test_regex() {
         //// 分支
         { R"=(((abc)|[\D])*)=",   0, R"===({"L 0,INF":[{B:[{S:[{C:"a"},{C:"b"},{C:"c"}]},{C:"0x00-0x2f,0x3a-0xff"}]}]})===" },
         
-        //
-        //{ R"=()=",       0, R"===({})===" },
-        //{ R"=()=",       0, R"===({})===" },
-        //{ R"=()=",       0, R"===({})===" },
-        //{ R"=()=",       0, R"===({})===" },
+        // 忽略大小写
+        { R"=([^\x00-\x60\x7b-\xff])=",  0 | Flag::CASELESS, R"===({C:"A-Z,a-z"})===" }, // [a-z]/i
+        { R"=([^\x00-\x40\x5b-\xff])=",  0 | Flag::CASELESS, R"===({C:"A-Z,a-z"})===" }, // [A-Z]/i
+        { R"=([abC123]abC123)=",         0 | Flag::CASELESS, R"===({S:[{C:"1-3,A-C,a-c"},{C:"A,a"},{C:"B,b"},{C:"C,c"},{C:"1"},{C:"2"},{C:"3"}]})===" },
+        { R"=([a-b]C123)=",              0 | Flag::CASELESS, R"===({S:[{C:"A-B,a-b"},{C:"C,c"},{C:"1"},{C:"2"},{C:"3"}]})===" },
     };
 
     for (const Case& cs : correct_expressions) {
         reset();
+        ctx.m_global_modifiers = cs.flag;
         const std::string script(cs.regex);
         ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
         if (ScanState::OK != ss || script.size() != offset) {
