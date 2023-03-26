@@ -412,7 +412,7 @@ void test_xml3()
     ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
     if (ScanState::OK != ss || script.size() != offset) {
         std::cout << err << std::endl;
-        std::cerr << ctx.ErrorPrompts(script) << std::endl;
+        std::cerr << ctx.ErrorPrompts(offset, script) << std::endl;
     }
     else {
         assert(ScanState::OK == ss && script.size() == offset);
@@ -475,7 +475,7 @@ void test_xml4()
     ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
     if (ScanState::OK != ss || script.size() != offset) {
         std::cout << err << std::endl;
-        std::cerr << ctx.ErrorPrompts(script) << std::endl;
+        std::cerr << ctx.ErrorPrompts(offset, script) << std::endl;
     }
     else {
         assert(ScanState::OK == ss && script.size() == offset);
@@ -533,7 +533,7 @@ void test_with_args()
     assert(ScanState::OK != ss && script.size() != offset); (void)ss;
     if (ScanState::OK != ss || script.size() != offset) {
         std::cerr << err << std::endl;
-        std::cerr << ctx.ErrorPrompts(script) << std::endl;
+        std::cerr << ctx.ErrorPrompts(offset, script) << std::endl;
     }
     std::cout << "-----------" << std::endl;
 }
@@ -599,7 +599,7 @@ void test_friendly_error()
         ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
         if (ScanState::OK != ss || script.size() != offset) {
             std::cerr << err << std::endl;
-            std::cerr << ctx.ErrorPrompts(script) << std::endl;
+            std::cerr << ctx.ErrorPrompts(offset, script) << std::endl;
         }
         else {
             assert(script.size() == offset);
@@ -616,7 +616,7 @@ void test_friendly_error()
         ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
         if (ScanState::OK != ss || script.size() != offset) {
             std::cerr << err << std::endl;
-            std::cerr << ctx.ErrorPrompts(script) << std::endl;
+            std::cerr << ctx.ErrorPrompts(offset, script) << std::endl;
         }
         else {
             assert(script.size() == offset);
@@ -639,7 +639,7 @@ void test_friendly_error()
         ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
         if (ScanState::OK != ss || script.size() != offset) {
             std::cout << err << std::endl;
-            std::cout << ctx.ErrorPrompts(script) << std::endl;
+            std::cout << ctx.ErrorPrompts(offset, script) << std::endl;
         }
         else {
             assert(script.size() == offset);
@@ -701,7 +701,7 @@ void test_as_int()
     ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
     if (ScanState::OK != ss || script.size() != offset) {
         std::cerr << err << std::endl;
-        std::cerr << ctx.ErrorPrompts(script) << std::endl;
+        std::cerr << ctx.ErrorPrompts(offset, script) << std::endl;
     }
     else {
         assert(script.size() == offset);
@@ -740,7 +740,7 @@ void test_as_int()
 //    ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
 //    if (ScanState::OK != ss || script.size() != offset) {
 //        std::cerr << err << std::endl;
-//        std::cerr << ctx.ErrorPrompts(script) << std::endl;
+//        std::cerr << ctx.ErrorPrompts(offset, script) << std::endl;
 //    }
 //    else {
 //        assert(script.size() == offset);
@@ -1725,7 +1725,7 @@ void test_regex() {
         ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
         if (ScanState::OK != ss || script.size() != offset) {
             std::cerr << err << std::endl;
-            std::cerr << ctx.ErrorPrompts(script) << std::endl;
+            std::cerr << ctx.ErrorPrompts(offset, script) << std::endl;
         }
         else {
             assert(script.size() == offset);
@@ -1740,6 +1740,36 @@ void test_regex() {
         ctx.Finish();
         const std::string dump = regex::Dump(ast);
         assert(dump == cs.result);  // test !!!
+    }
+
+    // 错误的正则表达式用例
+    std::vector<std::pair<std::string, uint32_t>> wrong_expression = {
+        { "a**",       0 }, // nothing to repeat
+        { "a{1,2}??",  0 }, // nothong to repeat
+        { R"=(\x0w)=", 0 }, // 非法的十六进制 : illegal hexadecimal
+        { R"=([a-z][^0-9_123]?????(230-.{,2000})?(230 ).*?\r\n)=", 0 }, // nothing to repeat
+        { R"=(a{3,1})=", 0 }, // m > n : out of order
+        { R"=([7-\r])=", 0 }, // m > n : out of order
+    };
+
+    for (auto&& cs : wrong_expression) {
+        reset();
+        ctx.m_global_modifiers = cs.second;
+        const std::string script(cs.first);
+        ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
+        if (ScanState::OK != ss || script.size() != offset) {
+            std::cerr << err << std::endl;
+            std::cerr << ctx.ErrorPrompts(offset, script) << std::endl;
+        }
+        else {
+            assert(script.size() == offset);
+            auto res = InvokeActions(ctx, err);
+            if (!res.first) {
+                std::cerr << err << std::endl;
+            }
+
+            assert(false == res.first);  // test !!!
+        }
     }
 
     std::cout << "-----------" << std::endl;
