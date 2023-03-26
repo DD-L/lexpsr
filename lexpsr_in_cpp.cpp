@@ -755,8 +755,8 @@ void test_as_int()
 namespace regex {
     enum Flag : uint32_t {
         DEFAULT     = 0,
-        CASELESS    = (1 << 0),    // i
-        LESS_MATCH  = (1 << 2),  // 非贪婪匹配
+        CASELESS    = (1 << 0), // i
+        LESS_MATCH  = (1 << 2), // 非贪婪匹配
         DOT_NOT_ALL = (1 << 3), // . 不匹配所有， 与其他正则引擎不同，这里默认 ‘.’ 是匹配所有的
     };
 
@@ -1153,7 +1153,6 @@ void test_regex() {
         void Reset() {
             core::Context::Reset();
 
-            m_int_temp_in_lazy = 0;
             m_int_num_stack.clear();
             m_negative_flag_opt_stack.clear();
             m_branch_cnt_stack.clear();
@@ -1281,11 +1280,13 @@ void test_regex() {
         const core::StrRef& tok = args.m_action_material.m_token;
         auto&& ctx = Ctx(args.m_contex);
         assert(tok.data && tok.len >= 1u);
+        if (0 == tok.len) { return false; }
 
-        auto calc = [&ctx](uint8_t c) {
-            std::size_t old = ctx.m_int_temp_in_lazy;
-            ctx.m_int_temp_in_lazy = ctx.m_int_temp_in_lazy * 10u + (c - '0');
-            if (ctx.m_int_temp_in_lazy < old) {
+        uint64_t value = 0;
+        auto calc = [&value](uint8_t c) {
+            std::size_t old = value;
+            value = value * 10u + (c - '0');
+            if (value < old) {
                 return false;
             }
             return true;
@@ -1297,6 +1298,7 @@ void test_regex() {
                 return false;
             }
         }
+        ctx.m_int_num_stack.push_back(value);
         return true;
     };
 
@@ -1394,7 +1396,7 @@ void test_regex() {
             ctx.m_loop_less_opt_stack.push_back(1u);
         }
         else {
-            ctx.m_loop_less_opt_stack.push_back(0);
+            ctx.m_loop_less_opt_stack.push_back(loop_cnt);
         }
         return true;
     };
@@ -1645,11 +1647,13 @@ void test_regex() {
         { "[a-z][^0-9_123]", 0, R"===({S:[{C:"a-z"},{C:"0x00-0x2f,0x3a-0x5e,0x60-0xff"}]})===" },
         { "[\\]]",           0, R"===({C:"0x5d"})===" },
         { "a*",              0, R"===({"L 0,INF":[{C:"a"}]})===" },
-        //{ "", 0, R"===({})===" },
-        //{ "", 0, R"===({})===" },
-        //{ "", 0, R"===({})===" },
-        //{ "", 0, R"===({})===" },
-        //{ "", 0, R"===({})===" },
+        { "a*a*",            0, R"===({S:[{"L 0,INF":[{C:"a"}]},{"L 0,INF":[{C:"a"}]}]})===" },
+        { "(a*)*",           0, R"===({"L 0,INF":[{"L 0,INF":[{C:"a"}]}]})===" },       // 这里没有经过最小化
+        { "a{1,2}",          0, R"===({"L 1,2":[{C:"a"}]})===" },
+        { "a{1,2}?",         0, R"===({"L 1,2 less":[{C:"a"}]})===" },
+        { "(abc{1}){2}",     0, R"===({"L 2,2":[{S:[{C:"a"},{C:"b"},{C:"c"}]}]})===" }, // c{1} 经过了最小化
+        { "(abc{1}?){2}",    0, R"===({"L 2,2":[{S:[{C:"a"},{C:"b"},{C:"c"}]}]})===" }, // c{1} 经过了最小化
+        { "c{2}?",           0, R"===({"L 2,2":[{C:"c"}]})===" },  // 这里的 less 经过了优化处理
         //{ "", 0, R"===({})===" },
         //{ "", 0, R"===({})===" },
         //{ "", 0, R"===({})===" },
