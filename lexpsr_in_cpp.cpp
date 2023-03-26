@@ -1127,7 +1127,7 @@ namespace regex {
                 std::string min_cnt = cnt_to_str(loop_flag.m_range.first);
                 std::string max_cnt = cnt_to_str(loop_flag.m_range.second);
                 auto less_flag = loop_flag.m_less ? " less" : "";
-                return show_seq_branch_loop(R"("L )" + min_cnt + "," + max_cnt + less_flag + R"(":[)", node);
+                return show_seq_branch_loop(R"({"L )" + min_cnt + "," + max_cnt + less_flag + R"(":[)", node);
             }
             default:
                 assert(((void)0, false));
@@ -1640,7 +1640,23 @@ void test_regex() {
     };
     // S: Seq; B: Branch; L: Loop; C: CharSet
     std::vector<Case> correct_expressions = {
-        { "[abC123]",   0,    R"===({C:"1-3,C,a-b"})===" },
+        { "[abC123]",        0, R"===({C:"1-3,C,a-b"})===" },
+        { "[^0-9_123]",      0, R"===({C:"0x00-0x2f,0x3a-0x5e,0x60-0xff"})===" },
+        { "[a-z][^0-9_123]", 0, R"===({S:[{C:"a-z"},{C:"0x00-0x2f,0x3a-0x5e,0x60-0xff"}]})===" },
+        { "[\\]]",           0, R"===({C:"0x5d"})===" },
+        { "a*",              0, R"===({"L 0,INF":[{C:"a"}]})===" },
+        //{ "", 0, R"===({})===" },
+        //{ "", 0, R"===({})===" },
+        //{ "", 0, R"===({})===" },
+        //{ "", 0, R"===({})===" },
+        //{ "", 0, R"===({})===" },
+        //{ "", 0, R"===({})===" },
+        //{ "", 0, R"===({})===" },
+        //{ "", 0, R"===({})===" },
+        //{ "", 0, R"===({})===" },
+        //{ "", 0, R"===({})===" },
+        //{ "", 0, R"===({})===" },
+        //{ "", 0, R"===({})===" },
     };
 
     for (const Case& cs : correct_expressions) {
