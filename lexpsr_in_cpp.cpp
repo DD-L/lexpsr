@@ -1203,7 +1203,7 @@ void test_regex() {
 
     auto ac_hex = [](const ActionArgs& args) {
         const core::StrRef& tok = args.m_action_material.m_token;
-        assert(4u == tok.len);
+        assert(2u == tok.len);
         uint8_t first  = tok[0];
         uint8_t second = tok[1];
         auto xx = [](uint8_t c) -> uint8_t {
@@ -1569,12 +1569,9 @@ void test_regex() {
     //
     ///////////////////////// parser ////////////////////////
     psr($digit) = range('0', '9');
-    psr($alpha) = range('a', 'z')('A', 'Z');
-    psr($hex)   = (R"(\x)"_psr, ($digit('a', 'f')('A', 'Z')[{2, 2}] | fatal_if(epsilon, "illegal hexadecimal")));
-
-    psr(digit) = $digit <<= ac_char;
-    psr(alpha) = $alpha <<= ac_char;
-    psr(hex)   = $hex   <<= ac_hex;
+    psr(digit) = $digit                                                                                        <<= ac_char;
+    psr(alpha) = range('a', 'z')('A', 'Z')                                                                     <<= ac_char;
+    psr(hex)   = (R"(\x)"_psr, ($digit('a', 'f')('A', 'F')[{2, 2}] | fatal_if(epsilon, "illegal hexadecimal")) <<= ac_hex);
 
     psr(escape_char_one_alpha) = (R"(\)"_psr, (set("tnvfr0dDsSwW" R"---(/\.^$*+?()[]{}|-)---") | fatal_if(epsilon, "unsupported escape character"))) // 多字符集 & 原样输出
                                  <<= ac_escape_char_one_alpha;
@@ -1654,6 +1651,18 @@ void test_regex() {
         { "(abc{1}){2}",     0, R"===({"L 2,2":[{S:[{C:"a"},{C:"b"},{C:"c"}]}]})===" }, // c{1} 经过了最小化
         { "(abc{1}?){2}",    0, R"===({"L 2,2":[{S:[{C:"a"},{C:"b"},{C:"c"}]}]})===" }, // c{1} 经过了最小化
         { "c{2}?",           0, R"===({"L 2,2":[{C:"c"}]})===" },  // 这里的 less 经过了优化处理
+        { "-",               0, R"===({C:"0x2d"})===" },
+        { "\\r",             0, R"===({C:"0x0d"})===" },
+        { "\\t\\t",          0, R"===({S:[{C:"0x09"},{C:"0x09"}]})===" },
+        { "\\xab\\x12",      0, R"===({S:[{C:"0xab"},{C:"0x12"}]})===" },
+        { "[a-b][1-9]",      0, R"===({S:[{C:"a-b"},{C:"1-9"}]})===" },
+        { "12abc",           0, R"===({S:[{C:"1"},{C:"2"},{C:"a"},{C:"b"},{C:"c"}]})===" },
+        { "ab",              0, R"===({S:[{C:"a"},{C:"b"}]})===" },
+        { "\\r\\n",          0, R"===({S:[{C:"0x0d"},{C:"0x0a"}]})===" },
+        //{ "", 0, R"===({})===" },
+        //{ "", 0, R"===({})===" },
+        //{ "", 0, R"===({})===" },
+        //{ "", 0, R"===({})===" },
         //{ "", 0, R"===({})===" },
         //{ "", 0, R"===({})===" },
         //{ "", 0, R"===({})===" },
