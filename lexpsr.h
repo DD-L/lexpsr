@@ -1004,7 +1004,7 @@ namespace _LEXPARSER_SHELL
             std::visit([&](auto&& _psr) -> ScanState {
                 typedef typename std::decay<decltype(_psr)>::type P;
                 if constexpr (std::is_same<P, UnbindPsr>::value) {
-                    err = "UnbindPsr: ...";
+                    err = "UnbindPsr: " + (this->anonymous() ? "..." : "`"+ this->name() +"`");
                     assert(((void)0, false));
                     return (ret = ScanState::Fatal);
                 }
@@ -1131,6 +1131,11 @@ namespace _LEXPARSER_SHELL
         [[maybe_unused]] Parser operator<<=(const T& expr, const Action& action) {
             // 对与 T 类型的约束，Expr 的构造函数会出手
             return Parser(ActionPsr{ Parser(expr), action });
+        }
+
+        template <std::size_t N>
+        [[maybe_unused]] Parser operator<<=(const char (&expr)[N], const Action& action) {
+            return operator<<=(std::string(expr), action);
         }
 
         template <class T>
