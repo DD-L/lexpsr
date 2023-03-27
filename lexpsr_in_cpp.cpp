@@ -1609,7 +1609,7 @@ void test_regex() {
 
     decl_psr(group);
 
-    psr(loop)   = ((group | literal), loop_flag_opt)                       <<= ac_loop;
+    psr(loop)   = ((group.weak() | literal), loop_flag_opt)                <<= ac_loop;
     psr(seq)    = loop[at_least_1]                                         <<= ac_seq;
     psr(branch) = (seq, ("|"_psr, seq)[any_cnt] <<= ac_branch_follow_up)   <<= ac_branch;
 
