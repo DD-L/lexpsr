@@ -976,13 +976,13 @@ namespace _LEXPARSER_SHELL
             });
         }
 
-        template <class Int, class _Trans = tools::ToInt<Int>>
-        Parser slice_as_int(IntVal<Int>& value, _Trans&& transducer = _Trans()) const {
-            assert(!!value); // 不应该为空
-            return with_slice_callback([value, transducer](core::StrRef tok) mutable { 
-                *value = transducer(tok); 
-            });
-        }
+        //template <class Int, class _Trans = tools::ToInt<Int>>
+        //Parser slice_as_int(IntVal<Int>& value, _Trans&& transducer = _Trans()) const {
+        //    assert(!!value); // 不应该为空
+        //    return with_slice_callback([value, transducer](core::StrRef tok) mutable { 
+        //        *value = transducer(tok); 
+        //    });
+        //}
 
         template <class Int, class _Trans = tools::ToInt<Int>>
         Parser slice_as_int_psr(Parser& out, _Trans&& transducer = _Trans()) const {
@@ -1300,7 +1300,7 @@ namespace _LEXPARSER_SHELL
         template <class BinocularOperator, class Int1, class Int2,
             class = typename std::enable_if<details::IsInt<Int1>::value&& details::IsInt<Int2>::value>::type >
         Parser int_op(BinocularOperator&& op, const Int1& left, const Int2& right) noexcept {
-            //return $curry([=]() {
+            //return $curry([=]() { // 设计成及早求值是否是好的设计？ @TODO
             if (details::valid_int(left) && details::valid_int(right)) {
                 return Parser(local_int(op(details::intrinsic_int(left), details::intrinsic_int(right))));
             }
@@ -1312,7 +1312,7 @@ namespace _LEXPARSER_SHELL
         template <class MoncularOperator, class Int,
             class = typename std::enable_if<details::IsInt<Int>::value>::type>
         Parser int_op(MoncularOperator&& op, const Int& operand) noexcept {
-            //return $curry([=]() {
+            //return $curry([=]() { // 设计成及早求值是否是好的设计？@TODO
             if (details::valid_int(operand)) {
                 return Parser(local_int(op(details::intrinsic_int(operand))));
             }
