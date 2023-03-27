@@ -828,6 +828,9 @@ namespace _LEXPARSER_SHELL
         template <>
         struct IsInt <IntPsr> : std::true_type { typedef IntPsr type; };
 
+        template <>
+        struct IsInt <Parser> : std::true_type { typedef Parser type; };
+
         template <class Int, class = std::enable_if_t<std::is_integral_v<std::decay_t<Int>>>>
         static inline constexpr bool valid_int(Int) { return true; }
 
@@ -840,6 +843,11 @@ namespace _LEXPARSER_SHELL
             }, i);
         }
 
+        template <class ParserTy, class = std::enable_if_t<std::is_same_v<ParserTy, Parser>>>
+        static inline bool valid_int(const ParserTy& i) {
+            return nullptr != std::get_if<IntPsr>(&(i.unwrap().m_psr));
+        }
+
         template <class Int, class = std::enable_if_t<std::is_integral_v<std::decay_t<Int>>>>
         static inline constexpr Int intrinsic_int(Int i) { return i; }
 
@@ -850,6 +858,11 @@ namespace _LEXPARSER_SHELL
             return std::visit([](auto&& v) {
                 return static_cast<int64_t>(intrinsic_int(v));
             }, i);
+        }
+
+        template <class ParserTy, class = std::enable_if_t<std::is_same_v<ParserTy, Parser>>>
+        static inline int64_t intrinsic_int(const ParserTy& p) {
+            return intrinsic_int(p.as_int());
         }
     } // namespace details
 
@@ -968,6 +981,14 @@ namespace _LEXPARSER_SHELL
             assert(!!value); // 不应该为空
             return with_slice_callback([value, transducer](core::StrRef tok) mutable { 
                 *value = transducer(tok); 
+            });
+        }
+
+        template <class Int, class _Trans = tools::ToInt<Int>>
+        Parser slice_as_int_psr(Parser& out, _Trans&& transducer = _Trans()) const {
+            assert(std::get_if<PreDeclPsr>(&out.m_psr));
+            return with_slice_callback([out, transducer](core::StrRef tok) mutable {
+                out = Parser(local_int(transducer(tok)));
             });
         }
 
@@ -1236,13 +1257,13 @@ namespace _LEXPARSER_SHELL
 
         template <class Op, class Int1, class Int2,
             class = typename std::enable_if<details::IsInt<Int1>::value && details::IsInt<Int2>::value>::type>
-        Parser IntCmp(Op&& op, const Int1& left, const Int2& right) {
-            //return $curry([op, left, right]() {
+        Parser IntCmp(Op&& cmp, const Int1& left, const Int2& right) {
+            return $curry([cmp, left, right]() {
                 if (details::valid_int(left) && details::valid_int(right)) {
-                    return op(details::intrinsic_int(left), details::intrinsic_int(right)) ? epsilon : _false;
+                    return cmp(details::intrinsic_int(left), details::intrinsic_int(right)) ? epsilon : _false;
                 }
                 return fatal_if(epsilon, "Unassigned integer variables"); // 有整数变量未赋值就使用
-            //}).with_args();
+            }).with_args();
         }
 
         template <class Int1, class Int2>
@@ -1275,19 +1296,27 @@ namespace _LEXPARSER_SHELL
             return IntCmp(std::less_equal(), left, right);
         }
 
-        // int 类型的双目运算
-        template <class BinocularOperator, class Int1, class Int2>
+        // int 类型的双目运算（及早求值）, 返回值也是 Int
+        template <class BinocularOperator, class Int1, class Int2,
+            class = typename std::enable_if<details::IsInt<Int1>::value&& details::IsInt<Int2>::value>::type >
         Parser int_op(BinocularOperator&& op, const Int1& left, const Int2& right) noexcept {
             //return $curry([=]() {
+            if (details::valid_int(left) && details::valid_int(right)) {
                 return Parser(local_int(op(details::intrinsic_int(left), details::intrinsic_int(right))));
+            }
+            return fatal_if(epsilon, "Unassigned integer variables"); // 有整数变量未赋值就使用
             //}).with_args();
         }
 
-        // int 类型的单目运算
-        template <class MoncularOperator, class Int>
+        // int 类型的单目运算（及早求值）, 返回值也是 Int
+        template <class MoncularOperator, class Int,
+            class = typename std::enable_if<details::IsInt<Int>::value>::type>
         Parser int_op(MoncularOperator&& op, const Int& operand) noexcept {
             //return $curry([=]() {
+            if (details::valid_int(operand)) {
                 return Parser(local_int(op(details::intrinsic_int(operand))));
+            }
+            return fatal_if(epsilon, "Unassigned integer variables"); // 有整数变量未赋值就使用
             //}).with_args();
         }
 

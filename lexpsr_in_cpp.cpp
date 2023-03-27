@@ -681,18 +681,13 @@ void test_as_int()
         return true;
     };
 
-    decl_psr(loop) = $curry([&loop, ac_a, ac_b]() {
-        psr(a) = range(0, char(0xff)) <<= ac_a;
-        psr(b) = range(0, char(0xff)) <<= ac_b;
+    decl_psr(loop) = $curry([loop = loop.weak(), ac_a, ac_b]() { // `loop = loop.weak()` or `&loop` 
+        psr(a) = any_char <<= ac_a;
+        psr(b) = any_char <<= ac_b;
 
-        auto int_a = local_int<int>();
-        psr(c) = (a.slice_as_int(int_a), b);
-        //return (c, (eq(int_a, 0) | loop.with_args()));
-
-        psr(cond) = $curry([=]() {
-            return eq(int_a, 0);
-        });
-        return (c, (cond | loop.with_args()));
+        decl_psr(int_a);
+        psr(c) = (a.slice_as_int_psr<int>(int_a), b);
+        return (c, eq(int_a, 0) | loop.with_args());
     });
 
 
@@ -720,7 +715,12 @@ void test_as_int()
 
 void test_var_loop_cnt() {
     // 
-    // xxx
+    // fn loop = (cnt) -> {
+    //     do_something();
+    //     if (cnt > 0) {
+    //         loop(cnt - 1);
+    //     }
+    // }
     //
     using namespace lexpsr_shell;
 
@@ -729,13 +729,11 @@ void test_var_loop_cnt() {
         return true;
     };
 
-    decl_psr(loop) = $curry([&loop, ac](const Parser& cnt) -> Parser {
-        psr(a) = range(0, char(0xff)) <<= ac;
-        // return le(cnt, 0) | (a, loop.with_args(cnt.plus(-1)));
+    decl_psr(loop) = $curry([&loop, ac](const Parser& cnt) -> Parser { // or `loop = loop.weak()`
+        psr(a) = any_char <<= ac;
         auto minus = [](auto v1, auto v2) { 
             return v1 - v2; 
         };
-        //return le(cnt.as_int(), 0) | (a, loop.with_args(int_op(minus, cnt.as_int(), 1).apply()));
         return le(cnt.as_int(), 0) | (a, loop.with_args(int_op(minus, cnt.as_int(), 1)));
     });
 
