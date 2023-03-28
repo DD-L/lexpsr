@@ -577,14 +577,14 @@ void test_friendly_error()
         //     首字节 'a' 会被 head 成功吃掉，进而在第二个字节遇到'b'，但是它期望':'导致失败
     };
 
-    psr(a) = together("a"_psr, (ident, "->"_psr, ident));
-    psr(b) = together("b"_psr, (ident, "->"_psr, "0"_psr));
-    psr(c) = together("c"_psr, ("0"_psr, "->"_psr, ident));
-    psr(d) = $curry(together).apply("d"_psr, (identlist, "->"_psr, "0"_psr)); // 也可以用 lexpsr 语言内置的 $curry + apply
-    psr(e) = together("e"_psr, ("0"_psr, "->"_psr, identlist));
-    psr(f) = together("f"_psr, (identlist, "->"_psr, ident));
-    psr(g) = together("g"_psr, (ident, "->"_psr, identlist));
-    psr(h) = together("h"_psr, (identlist, "->"_psr, identlist));
+    psr(a) = together("a:"_psr, (ident, "->"_psr, ident));
+    psr(b) = together("b:"_psr, (ident, "->"_psr, "0"_psr));
+    psr(c) = together("c:"_psr, ("0"_psr, "->"_psr, ident));
+    psr(d) = $curry(together).apply("d:"_psr, (identlist, "->"_psr, "0"_psr)); // 也可以用 lexpsr 语言内置的 $curry + apply
+    psr(e) = together("e:"_psr, ("0"_psr, "->"_psr, identlist));
+    psr(f) = together("f:"_psr, (identlist, "->"_psr, ident));
+    psr(g) = together("g:"_psr, (ident, "->"_psr, identlist));
+    psr(h) = together("h:"_psr, (identlist, "->"_psr, identlist));
 
     psr(expr) = ((a | b | c | d | e | f | g | h), ";"_psr);
     psr(root) = expr[at_least_1];
@@ -630,7 +630,7 @@ void test_friendly_error()
         // 数字 123 应当出错
         script = R"(
             abc -> dfcwe;
-            abc -> dfcwe324;
+            a: abc -> dfcwe324;
             (abc, dd) -> 0;
             (abc, dd) -> (ds, 123);
             e: 0 -> (ident);
