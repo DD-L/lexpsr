@@ -716,8 +716,8 @@ void test_as_int()
 void test_var_loop_cnt() {
     // 
     // fn loop = (cnt) -> {
-    //     do_something();
     //     if (cnt > 0) {
+    //         do_something();
     //         loop(cnt - 1);
     //     }
     // }
