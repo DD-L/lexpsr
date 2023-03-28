@@ -894,6 +894,11 @@ namespace _LEXPARSER_SHELL
             : m_psr(expr), m_name(name)
         {}
 
+        template <class Int, class = std::enable_if_t<std::is_integral_v<Int>>>
+        explicit Parser(const Int& intval, const std::string& name = std::string())
+            : Parser(local_int(intval), name)
+        {}
+
         explicit Parser(const std::string& name)
             : m_name(name)
         {}

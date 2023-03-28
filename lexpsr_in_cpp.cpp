@@ -738,7 +738,7 @@ void test_var_loop_cnt() {
     });
 
     psr(ignore_to_end) = any_char[any_cnt];
-    psr(root) = (loop.with_args(Parser(local_int(5))), ignore_to_end);
+    psr(root) = (loop.with_args(Parser(5)), ignore_to_end);
 
     core::Context ctx;
     std::size_t offset = 0;
