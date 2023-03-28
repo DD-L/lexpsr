@@ -145,31 +145,36 @@ namespace _LEXPARSER_CORE {
         }
 
         std::size_t ErrorOffset() const { return m_crime_scenes.m_max; }
-        std::string ErrorPrompts(const std::string& script) const {
-            if (ErrorOffset() < script.size()) {
-                auto format = [&script, this](bool lastline, std::size_t pos, std::size_t last, std::size_t line_num) {
-                    const std::string line_content = script.substr(last, pos + 1u - last);
-                    const std::size_t offset_in_line = ErrorOffset() - last;
-
-                    const std::string line_num_str = " " + std::to_string(line_num);
-                    return line_num_str + " | " + line_content + (lastline ? "\n" : "")
-                        + std::string(line_num_str.size(), ' ') + " | " + std::string(offset_in_line, ' ') + "^";
-                };
-                std::size_t pos = 0;
-                std::size_t last = 0;
-                std::size_t line_num = 0;
-                for (; pos < script.size(); pos = script.find('\n', pos), ++line_num) {
-                    if (pos > ErrorOffset()) { // found
-                        return format(false, pos, last, line_num);
-                    }
-                    last = ++pos;
-                }
-
-                if (std::string::npos == pos) { // last line
-                    return format(true, pos, last, line_num);
-                }
+        std::string ErrorPrompts(std::size_t scan_offset, const std::string& script) const {
+            if (scan_offset >= script.size() && ErrorOffset() >= script.size()) {
+                return {}; // not found
             }
-            return {}; // not found
+
+            std::size_t error_offset = ErrorOffset();
+            if (error_offset >= script.size()) { error_offset = scan_offset; }
+
+            auto format = [&script, error_offset](bool lastline, std::size_t pos, std::size_t last, std::size_t line_num) {
+                const std::string line_content = script.substr(last, (std::string::npos == pos) ? pos : (pos + 1u - last));
+                const std::size_t offset_in_line = error_offset - last;
+
+                const std::string line_num_str = " " + std::to_string(line_num);
+                return line_num_str + " | " + line_content + (lastline ? "\n" : "")
+                    + std::string(line_num_str.size(), ' ') + " | " + std::string(offset_in_line, ' ') + "^";
+            };
+            std::size_t pos = 0;
+            std::size_t last = 0;
+            std::size_t line_num = 0;
+            for (; pos < script.size(); pos = script.find('\n', pos), ++line_num) {
+                if (pos > error_offset) { // found
+                    return format(false, pos, last, line_num);
+                }
+                last = ++pos;
+            }
+
+            if (std::string::npos == pos) { // last line
+                return format(true, pos, (1u == line_num ? 0u : last), line_num); // 一共就一行的情况下，last = 0
+            }
+            return {}; // logic error
         }
 
         void GoBackToWithRecording(std::size_t& offset, std::size_t oldOffset) {
@@ -1049,7 +1054,7 @@ namespace _LEXPARSER_SHELL
             return std::visit([&](auto&& _psr) -> ScanState {
                 typedef typename std::decay<decltype(_psr)>::type P;
                 if constexpr (std::is_same<P, UnbindPsr>::value) {
-                    err = "UnbindPsr: ...";
+                    err = "UnbindPsr: " + (this->anonymous() ? "..." : "`"+ this->name() +"`");
                     assert(((void)0, false));
                     return ScanState::Fatal;
                 }
@@ -1179,6 +1184,11 @@ namespace _LEXPARSER_SHELL
         [[maybe_unused]] Parser operator<<=(const T& expr, const Action& action) {
             // 对与 T 类型的约束，Expr 的构造函数会出手
             return Parser(ActionPsr{ Parser(expr), action });
+        }
+
+        template <std::size_t N>
+        [[maybe_unused]] Parser operator<<=(const char (&expr)[N], const Action& action) {
+            return operator<<=(std::string(expr), action);
         }
 
         template <class T>
