@@ -748,7 +748,7 @@ void test_var_loop_cnt() {
     ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
     if (ScanState::OK != ss || script.size() != offset) {
         std::cerr << err << std::endl;
-        std::cerr << ctx.ErrorPrompts(script) << std::endl;
+        std::cerr << ctx.ErrorPrompts(offset, script) << std::endl;
     }
     else {
         assert(script.size() == offset);
