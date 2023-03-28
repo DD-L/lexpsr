@@ -577,14 +577,14 @@ void test_friendly_error()
         //     首字节 'a' 会被 head 成功吃掉，进而在第二个字节遇到'b'，但是它期望':'导致失败
     };
 
-    psr(a) = together("a"_psr, (ident, "->"_psr, ident));
-    psr(b) = together("b"_psr, (ident, "->"_psr, "0"_psr));
-    psr(c) = together("c"_psr, ("0"_psr, "->"_psr, ident));
-    psr(d) = $curry(together).apply("d"_psr, (identlist, "->"_psr, "0"_psr)); // 也可以用 lexpsr 语言内置的 $curry + apply
-    psr(e) = together("e"_psr, ("0"_psr, "->"_psr, identlist));
-    psr(f) = together("f"_psr, (identlist, "->"_psr, ident));
-    psr(g) = together("g"_psr, (ident, "->"_psr, identlist));
-    psr(h) = together("h"_psr, (identlist, "->"_psr, identlist));
+    psr(a) = together("a:"_psr, (ident, "->"_psr, ident));
+    psr(b) = together("b:"_psr, (ident, "->"_psr, "0"_psr));
+    psr(c) = together("c:"_psr, ("0"_psr, "->"_psr, ident));
+    psr(d) = $curry(together).apply("d:"_psr, (identlist, "->"_psr, "0"_psr)); // 也可以用 lexpsr 语言内置的 $curry + apply
+    psr(e) = together("e:"_psr, ("0"_psr, "->"_psr, identlist));
+    psr(f) = together("f:"_psr, (identlist, "->"_psr, ident));
+    psr(g) = together("g:"_psr, (ident, "->"_psr, identlist));
+    psr(h) = together("h:"_psr, (identlist, "->"_psr, identlist));
 
     psr(expr) = ((a | b | c | d | e | f | g | h), ";"_psr);
     psr(root) = expr[at_least_1];
@@ -630,7 +630,7 @@ void test_friendly_error()
         // 数字 123 应当出错
         script = R"(
             abc -> dfcwe;
-            abc -> dfcwe324;
+            a: abc -> dfcwe324;
             (abc, dd) -> 0;
             (abc, dd) -> (ds, 123);
             e: 0 -> (ident);
@@ -681,13 +681,13 @@ void test_as_int()
         return true;
     };
 
-    decl_psr(loop) = $curry([&loop, ac_a, ac_b]() {
-        psr(a) = range(0, char(0xff)) <<= ac_a;
-        psr(b) = range(0, char(0xff)) <<= ac_b;
+    decl_psr(loop) = $curry([loop = loop.weak(), ac_a, ac_b]() { // `loop = loop.weak()` or `&loop` 
+        psr(a) = any_char <<= ac_a;
+        psr(b) = any_char <<= ac_b;
 
-        auto int_a = local_int<int>();
-        psr(c) = (a.slice_as_int(int_a), b);
-        return (c, (eq(int_a, 0) | loop.with_args()));
+        decl_psr(int_a);
+        psr(c) = (a.slice_as_int_psr<int>(int_a), b);
+        return (c, eq(int_a, 0) | loop.with_args());
     });
 
 
@@ -713,44 +713,52 @@ void test_as_int()
     std::cout << "-----------" << std::endl;
 }
 
-//void test_var_loop_cnt() {
-//    // 
-//    // xxx
-//    //
-//    using namespace lexpsr_shell;
-//
-//    auto ac = [](const ActionArgs& arg) {
-//        std::cout << arg.m_action_material.m_token.to_std_string() << std::endl;
-//        return true;
-//    };
-//
-//    decl_psr(loop) = $curry([&loop, ac](const Parser& cnt) -> Parser {
-//        psr(a) = range(0, char(0xff)) <<= ac;
-//        return le(cnt, 0) | (a, loop.with_args(cnt.plus(-1)));
-//    });
-//
-//    psr(ignore_to_end) = range(0, char(0xff))[any_cnt];
-//    psr(root) = (loop.with_args(Parser(local_int(5))), ignore_to_end);
-//
-//    core::Context ctx;
-//    std::size_t offset = 0;
-//    std::string err;
-//    std::string script("0123456789");
-//
-//    ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
-//    if (ScanState::OK != ss || script.size() != offset) {
-//        std::cerr << err << std::endl;
-//        std::cerr << ctx.ErrorPrompts(script) << std::endl;
-//    }
-//    else {
-//        assert(script.size() == offset);
-//        auto res = InvokeActions(ctx, err);
-//        if (!res.first) {
-//            std::cerr << err << std::endl;
-//        }
-//    }
-//    std::cout << "-----------" << std::endl;
-//}
+void test_var_loop_cnt() {
+    // 
+    // fn loop = (cnt) -> {
+    //     if (cnt > 0) {
+    //         do_something();
+    //         loop(cnt - 1);
+    //     }
+    // }
+    //
+    using namespace lexpsr_shell;
+
+    auto ac = [](const ActionArgs& arg) {
+        std::cout << arg.m_action_material.m_token.to_std_string() << std::endl;
+        return true;
+    };
+
+    decl_psr(loop) = $curry([&loop, ac](const Parser& cnt) -> Parser { // or `loop = loop.weak()`
+        psr(a) = any_char <<= ac;
+        auto minus = [](auto v1, auto v2) { 
+            return v1 - v2; 
+        };
+        return le(cnt, 0) | (a, loop.with_args(int_op(minus, cnt, 1))); // 遗留： int_op 需要做出惰性 Lambda ?
+    });
+
+    psr(ignore_to_end) = any_char[any_cnt];
+    psr(root) = (loop.with_args(Parser(5)), ignore_to_end);
+
+    core::Context ctx;
+    std::size_t offset = 0;
+    std::string err;
+    std::string script("0123456789");
+
+    ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
+    if (ScanState::OK != ss || script.size() != offset) {
+        std::cerr << err << std::endl;
+        std::cerr << ctx.ErrorPrompts(script) << std::endl;
+    }
+    else {
+        assert(script.size() == offset);
+        auto res = InvokeActions(ctx, err);
+        if (!res.first) {
+            std::cerr << err << std::endl;
+        }
+    }
+    std::cout << "-----------" << std::endl;
+}
 
 int main()
 {
@@ -765,7 +773,7 @@ int main()
     test_with_args();
     test_friendly_error();
     test_as_int();
-    // test_var_loop_cnt();
+    test_var_loop_cnt();
 
     return 0;
 }

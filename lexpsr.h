@@ -806,9 +806,15 @@ namespace _LEXPARSER_SHELL
         Args m_args; // 携带的实参，从该函数递归执行 apply
     };
 
-    // struct IntPsr {}; // 表示数字的 psr , 兼容丘奇数与立即数 @TODO
     template <class Int, class = typename std::enable_if<std::is_integral<Int>::value>::type>
     using IntVal = std::shared_ptr<std::optional<Int>>;
+
+    // struct IntPsr {}; // 表示数字的 psr , 兼容丘奇数与立即数 @TODO
+    typedef std::variant<
+        IntVal<int64_t>, IntVal<uint64_t>, IntVal<int32_t>, IntVal<uint32_t>,
+        IntVal<int16_t>, IntVal<uint16_t>, IntVal<int8_t>, IntVal<uint8_t>
+    > IntPsr;
+
     namespace details {
         template <class Val>
         using TraitValueType = typename Val::element_type::value_type;
@@ -819,18 +825,51 @@ namespace _LEXPARSER_SHELL
         template <class Int>
         struct IsInt <IntVal<Int>> : std::true_type { typedef Int type; };
 
+        template <>
+        struct IsInt <IntPsr> : std::true_type { typedef IntPsr type; };
+
+        template <>
+        struct IsInt <Parser> : std::true_type { typedef Parser type; };
+
         template <class Int, class = std::enable_if_t<std::is_integral_v<std::decay_t<Int>>>>
         static inline constexpr bool valid_int(Int) { return true; }
 
         template <class Int>
         static inline constexpr bool valid_int(const IntVal<Int>& i) { return (i && i->has_value()); }
 
+        static inline constexpr bool valid_int(const IntPsr& i) { 
+            return std::visit([](auto&& v) {
+                return valid_int(v);
+            }, i);
+        }
+
+        template <class ParserTy, class = std::enable_if_t<std::is_same_v<ParserTy, Parser>>>
+        static inline bool valid_int(const ParserTy& i) {
+            return nullptr != std::get_if<IntPsr>(&(i.unwrap().m_psr));
+        }
+
         template <class Int, class = std::enable_if_t<std::is_integral_v<std::decay_t<Int>>>>
         static inline constexpr Int intrinsic_int(Int i) { return i; }
 
         template <class Int>
         static inline constexpr Int intrinsic_int(const IntVal<Int>& i) { return i->value(); }
-    }
+
+        static inline constexpr int64_t intrinsic_int(const IntPsr& i) {
+            return std::visit([](auto&& v) {
+                return static_cast<int64_t>(intrinsic_int(v));
+            }, i);
+        }
+
+        template <class ParserTy, class = std::enable_if_t<std::is_same_v<ParserTy, Parser>>>
+        static inline int64_t intrinsic_int(const ParserTy& p) {
+            return intrinsic_int(p.as_int());
+        }
+    } // namespace details
+
+    namespace { // free function
+        template <class Int> IntVal<Int> local_int() noexcept { return std::make_shared<std::optional<Int>>(); }
+        template <class Int> IntVal<Int> local_int(Int v) noexcept { return std::make_shared<std::optional<Int>>(v); }
+    } // free function
 
     using PreDeclPsr     = std::shared_ptr<Parser>;
     using WeakPreDeclPsr = std::weak_ptr<Parser>;
@@ -838,7 +877,7 @@ namespace _LEXPARSER_SHELL
     struct Parser {
         typedef std::variant<UnbindPsr,
             StrPsr, CharSetPsr, SequencePsr, BranchPsr, LoopPsr, ActionPsr, NextNotPsr, FatalIfPsr, Scanner, NopPsr, LambdaPsr,
-            PreDeclPsr, WeakPreDeclPsr
+            PreDeclPsr, WeakPreDeclPsr, IntPsr
         > VariantParser;
 
     public:
@@ -853,6 +892,11 @@ namespace _LEXPARSER_SHELL
     public:
         explicit Parser(const VariantParser& expr, const std::string& name = std::string())
             : m_psr(expr), m_name(name)
+        {}
+
+        template <class Int, class = std::enable_if_t<std::is_integral_v<Int>>>
+        explicit Parser(const Int& intval, const std::string& name = std::string())
+            : Parser(local_int(intval), name)
         {}
 
         explicit Parser(const std::string& name)
@@ -937,11 +981,19 @@ namespace _LEXPARSER_SHELL
             });
         }
 
+        //template <class Int, class _Trans = tools::ToInt<Int>>
+        //Parser slice_as_int(IntVal<Int>& value, _Trans&& transducer = _Trans()) const {
+        //    assert(!!value); // 不应该为空
+        //    return with_slice_callback([value, transducer](core::StrRef tok) mutable { 
+        //        *value = transducer(tok); 
+        //    });
+        //}
+
         template <class Int, class _Trans = tools::ToInt<Int>>
-        Parser slice_as_int(IntVal<Int>& value, _Trans&& transducer = _Trans()) const {
-            assert(!!value); // 不应该为空
-            return with_slice_callback([value, transducer](core::StrRef tok) mutable { 
-                *value = transducer(tok); 
+        Parser slice_as_int_psr(Parser& out, _Trans&& transducer = _Trans()) const {
+            assert(std::get_if<PreDeclPsr>(&out.m_psr));
+            return with_slice_callback([out, transducer](core::StrRef tok) mutable {
+                out = Parser(local_int(transducer(tok)));
             });
         }
 
@@ -953,8 +1005,7 @@ namespace _LEXPARSER_SHELL
         }
 
         // CharRangePsr helper function
-        Parser operator()(const std::pair<char, char>& range) const
-        {
+        Parser operator()(const std::pair<char, char>& range) const {
             assert(std::get_if<CharSetPsr>(&unwrap().m_psr));
             auto copy = *this;
             std::get<CharSetPsr>(copy.unwrap().m_psr).AddMember(core::range_v, range);
@@ -981,15 +1032,10 @@ namespace _LEXPARSER_SHELL
         Parser operator[](details::any_cnt_t) const { return (*this)[any_cnt()]; }
         Parser operator[](details::at_least_1_t) const { return (*this)[at_least_1()]; }
 
-        //template <class Int, class = std::enable_if_t<std::is_integral_v<Int>>>
-        //Parser plus(Int v) const {
-        //    assert(std::get_if<IntPsr>(&unwrap().m_psr));
-        //    auto copy = *this;
-        //    return Parser(LambdaPsr([v, copy](const Parser&) {
-        //        auto x = std::get<IntPsr>(copy.unwrap().m_psr).value() + v;
-        //        return Parser(local_int(x));
-        //    }));
-        //}
+        const IntPsr& as_int() const {
+            assert(std::get_if<IntPsr>(&(unwrap().m_psr)));
+            return std::get<IntPsr>((unwrap().m_psr));
+        }
 
         bool anonymous() const { return name().empty(); }
         const std::string& name() const { return m_name; }
@@ -1000,13 +1046,12 @@ namespace _LEXPARSER_SHELL
         }
 
         ScanState operator()(const char* script, std::size_t len, std::size_t& offset, core::Context& ctx, std::string& err) const {
-            ScanState ret = ScanState::Fatal;
-            std::visit([&](auto&& _psr) -> ScanState {
+            return std::visit([&](auto&& _psr) -> ScanState {
                 typedef typename std::decay<decltype(_psr)>::type P;
                 if constexpr (std::is_same<P, UnbindPsr>::value) {
                     err = "UnbindPsr: ...";
                     assert(((void)0, false));
-                    return (ret = ScanState::Fatal);
+                    return ScanState::Fatal;
                 }
                 else if constexpr (std::is_same<P, LambdaPsr>::value) {
                     if (!_psr.m_args.empty()) { // 非空意味着当前 Lambda 携带实参，需执行 apply
@@ -1018,19 +1063,24 @@ namespace _LEXPARSER_SHELL
                             psr_fn.set_name(func_name + std::to_string(i));
                             psr_fn = psr_fn.apply(*arg);
                         }
-                        return (ret = psr_fn(script, len, offset, ctx, err));
+                        return psr_fn(script, len, offset, ctx, err);
                     }
-                    return (ret = apply()(script, len, offset, ctx, err));
+                    return apply()(script, len, offset, ctx, err);
                 }
                 else if constexpr (std::is_same<P, PreDeclPsr>::value) {
                     assert(nullptr != _psr);
-                    return (ret = (*_psr)(script, len, offset, ctx, err));
+                    return (*_psr)(script, len, offset, ctx, err);
                 }
                 else if constexpr (std::is_same<P, WeakPreDeclPsr>::value) {
                     assert(!_psr.expired());
                     auto tmp = _psr.lock();
                     assert(nullptr != tmp);
-                    return (ret = (*tmp)(script, len, offset, ctx, err));
+                    return (*tmp)(script, len, offset, ctx, err);
+                }
+                else if constexpr (std::is_same<P, IntPsr>::value) {
+                    err = "IntPsr: ...";
+                    assert(((void)0, false));
+                    return ScanState::Fatal;
                 }
                 else {
                     if (ctx.IgnoreWhiteSpaces() && (!ctx.InWhiteSpacesPsr())) {
@@ -1038,15 +1088,13 @@ namespace _LEXPARSER_SHELL
                         ctx.IgnoreWhiteSpaces()(script, len, offset, ctx, err);
                     }
                     std::size_t oldoffset = offset;
-                    ret = _psr(script, len, offset, ctx, err);
+                    ScanState ret = _psr(script, len, offset, ctx, err);
                     if (m_slice_callback && ScanState::OK == ret) {
                         m_slice_callback(core::StrRef{script + oldoffset, script + offset}); // @TODO 暂时不考虑脚本分段情况
                     }
                     return ret;
                 }
-            }, m_psr);
-
-            return ret;
+            }, m_psr); // end std::visit
         }
 
         Parser& unwrap() {
@@ -1210,13 +1258,14 @@ namespace _LEXPARSER_SHELL
         [[maybe_unused]] const Parser wss(Scanner(Parser::EatWss), "wss");          // wss 吃掉一批连续的白字符，永远成功
         [[maybe_unused]] const Parser utf8bom(StrPsr{ "\xEF\xBB\xBF" }, "utf8bom"); // UTF-8 编码的 BOM 头，通常这样使用：(utf8bom | epsilon), 或 ignore_utf8bom
         [[maybe_unused]] const Parser ignore_utf8bom(utf8bom | epsilon);            // 可表达 UTF-8 BOM 头允许被忽略的 psr
+        [[maybe_unused]] const Parser any_char = range(0, char(0xff));              // 任意单个字符，等价于正则表达式中的 /[\x00-\xff]/
 
         template <class Op, class Int1, class Int2,
             class = typename std::enable_if<details::IsInt<Int1>::value && details::IsInt<Int2>::value>::type>
-        Parser IntCmp(Op&& op, const Int1& left, const Int2& right) {
-            return $curry([op, left, right]() {
+        Parser IntCmp(Op&& cmp, const Int1& left, const Int2& right) {
+            return $curry([cmp, left, right]() {
                 if (details::valid_int(left) && details::valid_int(right)) {
-                    return op(details::intrinsic_int(left), details::intrinsic_int(right)) ? epsilon : _false;
+                    return cmp(details::intrinsic_int(left), details::intrinsic_int(right)) ? epsilon : _false;
                 }
                 return fatal_if(epsilon, "Unassigned integer variables"); // 有整数变量未赋值就使用
             }).with_args();
@@ -1252,6 +1301,30 @@ namespace _LEXPARSER_SHELL
             return IntCmp(std::less_equal(), left, right);
         }
 
+        // int 类型的双目运算（及早求值）, 返回值也是 Int
+        template <class BinocularOperator, class Int1, class Int2,
+            class = typename std::enable_if<details::IsInt<Int1>::value&& details::IsInt<Int2>::value>::type >
+        Parser int_op(BinocularOperator&& op, const Int1& left, const Int2& right) noexcept {
+            //return $curry([=]() { // 设计成及早求值是否是好的设计？ @TODO
+            if (details::valid_int(left) && details::valid_int(right)) {
+                return Parser(local_int(op(details::intrinsic_int(left), details::intrinsic_int(right))));
+            }
+            return fatal_if(epsilon, "Unassigned integer variables"); // 有整数变量未赋值就使用
+            //}).with_args();
+        }
+
+        // int 类型的单目运算（及早求值）, 返回值也是 Int
+        template <class MoncularOperator, class Int,
+            class = typename std::enable_if<details::IsInt<Int>::value>::type>
+        Parser int_op(MoncularOperator&& op, const Int& operand) noexcept {
+            //return $curry([=]() { // 设计成及早求值是否是好的设计？@TODO
+            if (details::valid_int(operand)) {
+                return Parser(local_int(op(details::intrinsic_int(operand))));
+            }
+            return fatal_if(epsilon, "Unassigned integer variables"); // 有整数变量未赋值就使用
+            //}).with_args();
+        }
+
         std::pair<bool, std::size_t> InvokeActions(core::Context& ctx, std::string& err) {
             std::size_t success_cnt = 0;
             const std::size_t sz = ctx.m_lazy_action.size();
@@ -1263,11 +1336,5 @@ namespace _LEXPARSER_SHELL
             }
             return std::make_pair(sz == success_cnt, success_cnt);
         }
-
-        template <class Int>
-        IntVal<Int> local_int() noexcept { return std::make_shared<std::optional<Int>>(); }
-
-        template <class Int>
-        IntVal<Int> local_int(Int v) noexcept { return std::make_shared<std::optional<Int>>(v); }
     } // namespace  // free function
 } // namespace _LEXPARSER_SHELL
