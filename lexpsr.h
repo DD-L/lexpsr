@@ -915,10 +915,13 @@ namespace _LEXPARSER_SHELL
             : m_psr(expr), m_name(name)
         {}
 
-        explicit Parser(const std::string& strval, const std::string& name = std::string()) : Parser(StrPsr(strval), name) {}
+        //Parser(const std::string& strval, const std::string& name = std::string()) : Parser(StrPsr(strval), name) {}
 
-        template <std::size_t N>
-        explicit Parser(const char (&strval)[N], const std::string& name = std::string()) : Parser(StrPsr(strval), name) {}
+        //template <std::size_t N>
+        //explicit Parser(const char (&strval)[N], const std::string& name = std::string()) : Parser(StrPsr(strval), name) {}
+
+        //template <std::size_t N>
+        //Parser(const char(&strval)[N]) : Parser(StrPsr(strval)) {}
 
         template <class Int, class = std::enable_if_t<std::is_integral_v<Int>>>
         explicit Parser(const Int& intval, const std::string& name = std::string())
