@@ -35,7 +35,7 @@
 #endif // ! _LEXPARSER_SHELL
 
 #ifndef LEXPSR_KEYWORD_PSR
-#define LEXPSR_KEYWORD_PSR(var) _LEXPARSER_SHELL::Parser var(#var); _LEXPARSER_SHELL::_PsrForward(var)
+#define LEXPSR_KEYWORD_PSR(var) _LEXPARSER_SHELL::Parser var(_LEXPARSER_SHELL::named_v, #var); _LEXPARSER_SHELL::_PsrForward(var)
 #endif // ! LEXPSR_KEYWORD_PSR
 
 #ifndef LEXPSR_KEYWORD_DECL_PSR
@@ -723,6 +723,9 @@ namespace _LEXPARSER_SHELL
         using at_most_1_t  = LoopCntPair(*)(AtMost1*);
 
         struct Forwarder { template <class T> constexpr T&& operator()(T&& arg) const noexcept { return std::forward<T>(arg); } };
+
+        struct _Named {};
+        using _named_arg_t = void(*)(_Named*);
     } // namespace details
 
     template <class T> static inline T& _PsrForward(T& v) { return details::Forwarder()(v); }
@@ -743,6 +746,8 @@ namespace _LEXPARSER_SHELL
         details::LoopCntPair at_least_1(details::AtLeast1* = nullptr) { return at_least(1u); }
         details::LoopCntPair at_most(std::size_t n) noexcept { return details::LoopCntPair{ 0, n }; }
         details::LoopCntPair at_most_1(details::AtMost1* = nullptr) { return at_most(1u); }
+
+        void named_v(details::_Named*) {}
     } // namespace free function
 
     namespace tools {
@@ -915,7 +920,7 @@ namespace _LEXPARSER_SHELL
             : Parser(local_int(intval), name)
         {}
 
-        explicit Parser(const std::string& name)
+        Parser(details::_named_arg_t, const std::string& name)
             : m_name(name)
         {}
 
