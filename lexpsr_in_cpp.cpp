@@ -74,7 +74,7 @@ void test_shell0()
     c = "ccc";
     d = "eeee";
     f = "ffff";
-    g = (a - b - c | d - "xxxde"_psr | f)[{2, 3}];  // - 的优先级要比 | 高
+    g = (a - b - c | d - "xxxde" | f)[{2, 3}];  // - 的优先级要比 | 高
 
 
     h = f[{ 2, 4 }];
@@ -94,21 +94,21 @@ void test_shell0()
         return (ret, abc)[at_most_1];
     };
 
-    psr(fn_app) = fn(m, "sdfs"_psr);                // 函数应用
+    psr(fn_app) = fn(m, "sdfs");                // 函数应用
 
 
     psr(id_lambda) = $curry([](Parser a) { return a; }); // 高阶函数： Parser -> Parser
-    psr(lambda_apply) = id_lambda.apply("xxxx"_psr);
+    psr(lambda_apply) = id_lambda.apply("xxxx");
 
-    psr(xxxx0) = $curry([]() {return "wewe"_psr; });
+    psr(xxxx0) = $curry([]() { return "wewe"_psr; });
     xxxx0.apply();
     psr(xxxx1) = $curry([](Parser a) {return a; });
     psr(xxxx2) = $curry([](Parser a, Parser b) {return a - b; });
     psr(xxxx3) = $curry([](Parser a, Parser b, Parser c) {return (a, b) | c; });
     psr(xxxx4) = $curry([](Parser a, Parser b, Parser c, Parser d) {return d | ((a, b) | c)[{2, 2}]; });
-    psr(xxxx4_app) = xxxx4.apply(""_psr).apply("werw"_psr).apply("ewfwe"_psr).apply("wewfwef"_psr);
-    psr(xxxx4_app2) = xxxx4.apply(""_psr, "werw"_psr).apply("ewfwe"_psr, "wewfwef"_psr);
-    psr(xxxx4_app3) = xxxx4.apply(""_psr, "werw"_psr, "ewfwe"_psr, "wewfwef"_psr);
+    psr(xxxx4_app) = xxxx4.apply("").apply("werw").apply("ewfwe").apply("wewfwef");
+    psr(xxxx4_app2) = xxxx4.apply("", "werw").apply("ewfwe", "wewfwef");
+    psr(xxxx4_app3) = xxxx4.apply("", "werw", "ewfwe", "wewfwef");
 }
 
 //void err()
@@ -132,7 +132,7 @@ void test_shell1()
     // [0-9] : CharSet("0123456789")
 
     // [1-9][0-9]*
-    psr(num) = (range('1', '9') - range('0', '9')[any_cnt]) | "0"_psr
+    psr(num) = (range('1', '9') - range('0', '9')[any_cnt]) | "0"
         <<=
         [](const ActionArgs& args)
     {
@@ -140,7 +140,7 @@ void test_shell1()
         return true;
     };
 
-    psr(root) = (num, "+"_psr, num, "="_psr, num);
+    psr(root) = (num, "+", num, "=", num);
 
     std::size_t offset = 0;
     core::Context ctx;
@@ -171,7 +171,7 @@ void test_shell1()
         ctx.Reset(); // 清理前一个 ctx 的垃圾
         offset = 0;
 
-        psr(comment) = "#"_psr - negative_set("\n")[any_cnt] - "\n"_psr;
+        psr(comment) = "#" - negative_set("\n")[any_cnt] - "\n";
         ctx.SetWhiteSpaces((ws | comment)[any_cnt]);
 
         core::ScanState res = root.ScanScript(script.data(), script.size(), offset, ctx, err);
@@ -186,8 +186,8 @@ void test_shell_unordered()
     using namespace lexpsr_shell;
     decl_psr(num);
 
-    psr(root) = (num, "+"_psr, num, "="_psr, num);
-    num = (range('1', '9'), range('0', '9')[any_cnt]) | "0"_psr;
+    psr(root) = (num, "+", num, "=", num);
+    num = (range('1', '9'), range('0', '9')[any_cnt]) | "0";
 
     num <<=
         [](const ActionArgs& args)
@@ -287,7 +287,7 @@ void test_xml1()
     psr(node_end) = ident <<= node_end_ac;
     psr(leaf) = ident <<= leaf_ac;
     psr(values) = (leaf | node.weak())[at_least_1];
-    node = (_, "<"_psr, _, node_begin, _, ">"_psr, _, values, _, "<"_psr, _, "/"_psr, _, node_end, _, ">"_psr, _);
+    node = (_, "<", _, node_begin, _, ">", _, values, _, "<", _, "/", _, node_end, _, ">", _);
 
     /////////////////////
     std::string err;
@@ -361,7 +361,7 @@ void test_xml2()
     psr(node_end) = ident <<= node_end_ac;
     psr(leaf) = ident <<= leaf_ac;
     psr(values) = (leaf | node.weak())[at_least_1];
-    node = (_, "<"_psr, _, node_begin, _, ">"_psr, _, values, _, "<"_psr, _, "/"_psr, _, node_end, _, ">"_psr, _);
+    node = (_, "<", _, node_begin, _, ">", _, values, _, "<", _, "/", _, node_end, _, ">", _);
 
     /////////////////////
     std::string err;
@@ -405,11 +405,11 @@ void test_xml3()
     decl_psr(node) = $curry([&_, &leaf, &node](const Parser& ident) {
     
         decl_psr(node_name);
-        psr(head) = ("<"_psr, _, ident.slice_as_str_psr(node_name), _, ">"_psr);
+        psr(head) = ("<", _, ident.slice_as_str_psr(node_name), _, ">");
     
-        psr(tail) = ("<"_psr, _, "/"_psr, _,
+        psr(tail) = ("<", _, "/", _,
             (node_name | fatal_if(nop, "The start and end of an xml node do not match.")),
-            _, ">"_psr);
+            _, ">");
     
         psr(values) = (leaf | node.with_args(ident))[at_least_1];
         return (_, head, _, values,  _, tail, _);
@@ -468,10 +468,10 @@ void test_xml4()
         psr(name_with_cb) = ident.with_slice_callback([tail, &_](core::StrRef slice) mutable {
             psr(name) = slice.to_std_string();
             assert(std::get_if<PreDeclPsr>(&tail.m_psr));
-            tail = ("<"_psr, _, "/"_psr, _, name, _, ">"_psr);
+            tail = ("<", _, "/", _, name, _, ">");
         });
 
-        psr(head) = ("<"_psr, _, name_with_cb, _, ">"_psr);
+        psr(head) = ("<", _, name_with_cb, _, ">");
         psr(values) = (leaf | node.with_args(ident))[at_least_1];
         psr(assert_tail) = tail | fatal_if(nop, "The start and end of an xml node do not match.");
 
@@ -578,7 +578,7 @@ void test_friendly_error()
     // [a-zA-Z_][a-zA-Z0-9_]*
     psr(ident_first) = range('a', 'z')('A', 'Z')('_', '_');
     psr(ident) = (ident_first, ident_first('0', '9')[any_cnt]);
-    psr(identlist) = ("("_psr, ident, (","_psr, ident)[any_cnt], ")"_psr);
+    psr(identlist) = ("(", ident, (",", ident)[any_cnt], ")");
 
     auto together = [](const Parser& head, const Parser& body) {
         return (head, body) | body;
@@ -589,16 +589,16 @@ void test_friendly_error()
         //     首字节 'a' 会被 head 成功吃掉，进而在第二个字节遇到'b'，但是它期望':'导致失败
     };
 
-    psr(a) = together("a:"_psr, (ident, "->"_psr, ident));
-    psr(b) = together("b:"_psr, (ident, "->"_psr, "0"_psr));
-    psr(c) = together("c:"_psr, ("0"_psr, "->"_psr, ident));
-    psr(d) = $curry(together).apply("d:"_psr, (identlist, "->"_psr, "0"_psr)); // 也可以用 lexpsr 语言内置的 $curry + apply
-    psr(e) = together("e:"_psr, ("0"_psr, "->"_psr, identlist));
-    psr(f) = together("f:"_psr, (identlist, "->"_psr, ident));
-    psr(g) = together("g:"_psr, (ident, "->"_psr, identlist));
-    psr(h) = together("h:"_psr, (identlist, "->"_psr, identlist));
+    psr(a) = together("a:", (ident, "->", ident));
+    psr(b) = together("b:", (ident, "->", "0"));
+    psr(c) = together("c:", ("0"_psr, "->", ident));
+    psr(d) = $curry(together).apply("d:", (identlist, "->", "0")); // 也可以用 lexpsr 语言内置的 $curry + apply
+    psr(e) = together("e:", ("0"_psr, "->", identlist));
+    psr(f) = together("f:", (identlist, "->", ident));
+    psr(g) = together("g:", (ident, "->", identlist));
+    psr(h) = together("h:", (identlist, "->", identlist));
 
-    psr(expr) = ((a | b | c | d | e | f | g | h), ";"_psr);
+    psr(expr) = ((a | b | c | d | e | f | g | h), ";");
     psr(root) = expr[at_least_1];
 
     // case 1
@@ -606,6 +606,7 @@ void test_friendly_error()
         reset();
         script = R"(
              abc -> dfcwe;
+           c: 0 -> xxx;
         )";
 
         ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
@@ -703,7 +704,7 @@ void test_as_int()
     });
 
 
-    psr(root) = ("{"_psr, loop.with_args(), "}"_psr);
+    psr(root) = ("{", loop.with_args(), "}");
 
     core::Context ctx;
     std::size_t offset = 0;
@@ -1589,23 +1590,23 @@ void test_regex() {
     psr($digit) = range('0', '9');
     psr(digit) = $digit                                                                                        <<= ac_char;
     psr(alpha) = range('a', 'z')('A', 'Z')                                                                     <<= ac_char;
-    psr(hex)   = (R"(\x)"_psr, ($digit('a', 'f')('A', 'F')[{2, 2}] | fatal_if(epsilon, "illegal hexadecimal")) <<= ac_hex);
+    psr(hex)   = (R"(\x)", ($digit('a', 'f')('A', 'F')[{2, 2}] | fatal_if(epsilon, "illegal hexadecimal"))     <<= ac_hex);
 
-    psr(escape_char_one_alpha) = (R"(\)"_psr, (set("tnvfr0dDsSwW" R"---(/\.^$*+?()[]{}|-)---") | fatal_if(epsilon, "unsupported escape character"))) // 多字符集 & 原样输出
+    psr(escape_char_one_alpha) = (R"(\)", (set("tnvfr0dDsSwW" R"---(/\.^$*+?()[]{}|-)---") | fatal_if(epsilon, "unsupported escape character"))) // 多字符集 & 原样输出
                                  <<= ac_escape_char_one_alpha;
 
     decl_psr(char_range_boundary);
 
-    psr(char_range)        = (char_range_boundary, "-"_psr, char_range_boundary)      <<= ac_char_range;
-    psr(int_num)           = ((range('1', '9'), range('0', '9')[any_cnt]) | "0"_psr)  <<= ac_int_num;
-    psr(negative_flag_opt) = "^"_psr[at_most_1]                                       <<= ac_negative_flag_opt; // ("^"_psr | epsilon) 可以省掉一个 stack @TODO
+    psr(char_range)        = (char_range_boundary, "-", char_range_boundary)          <<= ac_char_range;
+    psr(int_num)           = ((range('1', '9'), range('0', '9')[any_cnt]) | "0")      <<= ac_int_num;
+    psr(negative_flag_opt) = "^"_psr[at_most_1]                                       <<= ac_negative_flag_opt; // ("^" | epsilon) 可以省掉一个 stack @TODO
     psr(punct_char)        = set(R"---( -<>&:!"'#%,;=@_`~}])---")                     <<= ac_char;
     psr(not0x5d)           = negative_set("]")                                        <<= ac_not0x5d;
     psr(escape_char)       = hex | escape_char_one_alpha;
     char_range_boundary    = escape_char | not0x5d;
 
     psr(charset_content)   = (char_range | char_range_boundary)[any_cnt]              <<= ac_charset_content;
-    psr(charset)           = ("["_psr, negative_flag_opt, charset_content, "]"_psr)   <<= ac_charset;
+    psr(charset)           = ("[", negative_flag_opt, charset_content, "]")           <<= ac_charset;
 
     psr(dot) = "." <<= ac_dot;
     decl_psr(fatal_nothing2repeat); // 绑定 loop_flag
@@ -1613,10 +1614,10 @@ void test_regex() {
     psr(literal) = (charset | escape_char | digit | alpha | dot | punct_char | fatal_nothing2repeat) <<= ac_literal;
 
     psr(loop_less_opt) = "?"_psr[at_most_1]                                                          <<= ac_loop_less_opt;
-    psr(loop_n)        = ("{"_psr, int_num, "}"_psr)                                                 <<= ac_loop_n;
-    psr(loop_mn)       = ("{"_psr, int_num, ","_psr, int_num, "}"_psr)                               <<= ac_loop_mn;
-    psr(loop_m_comma)  = ("{"_psr, int_num, ",}"_psr)                                                <<= ac_loop_m_comma;
-    psr(loop_comma_n)  = ("{,"_psr, int_num, "}"_psr)                                                <<= ac_loop_comma_n;
+    psr(loop_n)        = ("{", int_num, "}")                                                         <<= ac_loop_n;
+    psr(loop_mn)       = ("{", int_num, ",", int_num, "}")                                           <<= ac_loop_mn;
+    psr(loop_m_comma)  = ("{", int_num, ",}")                                                        <<= ac_loop_m_comma;
+    psr(loop_comma_n)  = ("{,", int_num, "}")                                                        <<= ac_loop_comma_n;
 
     psr(loop_star)     = "*" <<= ac_loop_star;
     psr(loop_plus)     = "+" <<= ac_loop_plus;
@@ -1631,9 +1632,9 @@ void test_regex() {
 
     psr(loop)   = ((group.weak() | literal), loop_flag_opt)                <<= ac_loop;
     psr(seq)    = loop[at_least_1]                                         <<= ac_seq;
-    psr(branch) = (seq, ("|"_psr, seq)[any_cnt] <<= ac_branch_follow_up)   <<= ac_branch;
+    psr(branch) = (seq, ("|", seq)[any_cnt] <<= ac_branch_follow_up)       <<= ac_branch;
 
-    group = ("("_psr, branch, ")"_psr);
+    group = ("(", branch, ")");
     psr(root) = branch;
 
     ////////////////// end parser ///////////////////

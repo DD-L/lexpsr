@@ -915,6 +915,11 @@ namespace _LEXPARSER_SHELL
             : m_psr(expr), m_name(name)
         {}
 
+        Parser(const std::string& strval, const std::string& name = std::string()) : Parser(StrPsr(strval), name) {}
+
+        template <std::size_t N>
+        Parser(const char(&literal_string)[N]) : Parser(StrPsr(literal_string)) {} // literal string only
+
         template <class Int, class = std::enable_if_t<std::is_integral_v<Int>>>
         explicit Parser(const Int& intval, const std::string& name = std::string())
             : Parser(local_int(intval), name)
@@ -1175,20 +1180,49 @@ namespace _LEXPARSER_SHELL
         struct needs_unapply<T, std::void_t<decltype(std::declval<T>()())>> : std::false_type {};
 
         typedef std::function<bool(const ActionArgs&)> action_wrap_t;
+
+        template <template <class> class Pred, class T, class... Args>
+        struct all { static constexpr bool value = all<Pred, T>::value && all<Pred, Args...>::value; };
+        template <template <class> class Pred, class T> struct all<Pred, T> : Pred<T> {};
+
+        template <template <class> class Pred, class T, class... Args >
+        static constexpr inline bool all_v = all<Pred, T, Args...>::value;
+
+        template <class, class = void> struct _Parserable : std::false_type {};
+        template <class P> struct _Parserable<P, std::void_t<decltype(Parser(std::declval<P>()))>> : std::true_type {};
+
+        template <class P, class... Args>
+        struct IsPsr { static constexpr bool value = IsPsr<P>::value && IsPsr<Args...>::value; };
+        template <class P> struct IsPsr<P> : _Parserable<std::decay_t<P>> {};
+
+        namespace {
+            [[maybe_unused]] const Parser& ToPsr(const Parser& p) { return p; }
+            [[maybe_unused]] Parser ToPsr(const std::string& p) { return Parser(StrPsr(p)); }
+            template <std::size_t N>
+            [[maybe_unused]] Parser ToPsr(const char (&p)[N]) { return Parser(StrPsr(p)); }
+            template <class Int, class = std::enable_if_t<std::is_integral_v<Int>>>
+            [[maybe_unused]] Parser ToPsr(Int p) { return Parser(p); }
+        }
     } // namespace details
 
     namespace { // free function
-        [[maybe_unused]] Parser operator-(const Parser& a, const Parser& b) {
-            return (details::_MakeSeqOrBranchPair<SequencePsr>(a, b)); // _LXP_SEQUENCE_CONCATENATION_CHARACTER
+        template <class P1, class P2,
+                 class = std::enable_if_t<!details::all_v<std::is_integral, P1, P2> && details::IsPsr<P1, P2>::value>>
+        [[maybe_unused]] Parser operator-(const P1& a, const P2& b) {
+            return (details::_MakeSeqOrBranchPair<SequencePsr>(details::ToPsr(a), details::ToPsr(b))); // _LXP_SEQUENCE_CONCATENATION_CHARACTER
         }
 
-        [[maybe_unused]] Parser operator, (const Parser& a, const Parser& b) {
+        template <class P1, class P2,
+            class = std::enable_if_t<!details::all_v<std::is_integral, P1, P2>&& details::IsPsr<P1, P2>::value>>
+        [[maybe_unused]] Parser operator, (const P1& a, const P2& b) {
             return (a - b); // 序列连接兼容 ‘-’ 与 ‘,’ 只是它们的优先级不同
         }
 
         // | 也是与 , 类似
-        [[maybe_unused]] Parser operator|(const Parser& a, const Parser& b) {
-            return details::_MakeSeqOrBranchPair<BranchPsr>(a, b);
+        template <class P1, class P2,
+            class = std::enable_if_t<!details::all_v<std::is_integral, P1, P2> && details::IsPsr<P1, P2>::value>>
+        [[maybe_unused]] Parser operator|(const P1& a, const P2& b) {
+            return details::_MakeSeqOrBranchPair<BranchPsr>(details::ToPsr(a), details::ToPsr(b));
         }
 
         // <<= 与 = 优先级相同，但是他们都是右结合
