@@ -915,13 +915,10 @@ namespace _LEXPARSER_SHELL
             : m_psr(expr), m_name(name)
         {}
 
-        //Parser(const std::string& strval, const std::string& name = std::string()) : Parser(StrPsr(strval), name) {}
+        Parser(const std::string& strval, const std::string& name = std::string()) : Parser(StrPsr(strval), name) {}
 
-        //template <std::size_t N>
-        //explicit Parser(const char (&strval)[N], const std::string& name = std::string()) : Parser(StrPsr(strval), name) {}
-
-        //template <std::size_t N>
-        //Parser(const char(&strval)[N]) : Parser(StrPsr(strval)) {}
+        template <std::size_t N>
+        Parser(const char(&literal_string)[N]) : Parser(StrPsr(literal_string)) {} // literal string only
 
         template <class Int, class = std::enable_if_t<std::is_integral_v<Int>>>
         explicit Parser(const Int& intval, const std::string& name = std::string())
@@ -1192,8 +1189,7 @@ namespace _LEXPARSER_SHELL
         static constexpr inline bool all_v = all<Pred, T, Args...>::value;
 
         template <class, class = void> struct _Parserable : std::false_type {};
-        template <class P>
-        struct _Parserable<P, std::void_t<decltype(Parser(std::declval<P>()))>> : std::true_type {};
+        template <class P> struct _Parserable<P, std::void_t<decltype(Parser(std::declval<P>()))>> : std::true_type {};
 
         template <class P, class... Args>
         struct IsPsr { static constexpr bool value = IsPsr<P>::value && IsPsr<Args...>::value; };
