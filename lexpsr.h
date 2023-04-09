@@ -81,7 +81,7 @@ namespace _LEXPARSER_CORE {
     struct ActionMaterial;
     namespace details { class ActionScanner; }
 
-    enum class ScanState { OK = 0, Dismatch, Fatal }; // 进入引导词之后的失配即 Fatal
+    enum class ScanState { OK = 0, Mismatch, Fatal }; // 进入引导词之后的失配即 Fatal
 
     typedef std::function<ScanState(const char*, std::size_t, std::size_t&, Context&, std::string&)> ScanFunc;
     typedef std::function<bool(const ActionMaterial&, Context& ctx, std::string& err)>               Action; // 识别动作
@@ -227,9 +227,9 @@ namespace _LEXPARSER_CORE {
             std::size_t oldOffset = offset;
             for (const ScanFunc& sf : m_member) {
                 ScanState ss = sf(data, len, offset, ctx, err);
-                if (ScanState::Dismatch == ss) {
+                if (ScanState::Mismatch == ss) {
                     ctx.GoBackToWithRecording(offset, oldOffset);
-                    return ScanState::Dismatch;
+                    return ScanState::Mismatch;
                 }
 
                 if (ScanState::Fatal == ss) {
@@ -269,7 +269,7 @@ namespace _LEXPARSER_CORE {
             for (std::size_t i = 0; i < m_member.size(); ++i) {
                 const ScanFunc& sf = m_member[i];
                 ScanState ss = sf(data, len, offset, ctx, err);
-                if (ScanState::Dismatch != ss) {
+                if (ScanState::Mismatch != ss) {
                     assert(ScanState::OK == ss || ScanState::Fatal == ss);
                     ctx.m_scanner_info = i;
                     return ss;
@@ -279,7 +279,7 @@ namespace _LEXPARSER_CORE {
             }
 
             assert(oldOffset == offset);
-            return ScanState::Dismatch;
+            return ScanState::Mismatch;
         }
 
     private:
@@ -303,9 +303,9 @@ namespace _LEXPARSER_CORE {
             std::size_t oldOffset = offset;
             for (std::size_t i = 0; i < m_min; ++i) { // 必要条件： 满足最小循环次数
                 ScanState ss = m_member(data, len, offset, ctx, err);
-                if (ScanState::Dismatch == ss) {
+                if (ScanState::Mismatch == ss) {
                     ctx.GoBackToWithRecording(offset, oldOffset);
-                    return ScanState::Dismatch;
+                    return ScanState::Mismatch;
                 }
 
                 if (ScanState::Fatal == ss) {
@@ -317,7 +317,7 @@ namespace _LEXPARSER_CORE {
             for (; loop_cnt < m_max; ++loop_cnt) {
                 oldOffset = offset;
                 ScanState ss = m_member(data, len, offset, ctx, err);
-                if (ScanState::Dismatch == ss) {
+                if (ScanState::Mismatch == ss) {
                     ctx.GoBackTo(offset, oldOffset);
                     break;
                 }
@@ -364,8 +364,8 @@ namespace _LEXPARSER_CORE {
                 const std::size_t old_lazy_cnt = ctx.m_lazy_action.size();
                 ScanState ss = m_scanner(data, len, offset, ctx, err);
                 switch (ss) {
-                case ScanState::OK:       ss = ScanState::Dismatch;  break;
-                case ScanState::Dismatch: ss = ScanState::OK;        break;
+                case ScanState::OK:       ss = ScanState::Mismatch;  break;
+                case ScanState::Mismatch: ss = ScanState::OK;        break;
                 default:                  ss = ScanState::Fatal;     break;
                 }
                 ctx.GoBackTo(offset, old_offset); // 不产生任何副作用
@@ -447,7 +447,7 @@ namespace _LEXPARSER_CORE {
                     const char* end = data + offset;
                     ctx.m_lazy_action.emplace_back(ActionMaterial{ StrRef{ begin, end }, ctx.m_scanner_info, const_cast<ActionScanner*>(this)->shared_from_this() });
                 }
-                else if (ScanState::Dismatch == ss) {
+                else if (ScanState::Mismatch == ss) {
                     ctx.m_lazy_action.resize(old_lazy_cnt);
                 }
 
@@ -596,7 +596,7 @@ namespace _LEXPARSER_CORE {
             }
 
             if (offset + 1u > len) { // 至少要求一个字符
-                return ScanState::Dismatch;
+                return ScanState::Mismatch;
             }
 
             uint8_t c = (uint8_t)(data[offset]);
@@ -606,7 +606,7 @@ namespace _LEXPARSER_CORE {
                 return ScanState::OK;
             }
 
-            return ScanState::Dismatch;
+            return ScanState::Mismatch;
         }
 
         template <class Member>
@@ -647,7 +647,7 @@ namespace _LEXPARSER_CORE {
 
         ScanState operator()(const char* data, std::size_t len, std::size_t& offset, Context&, std::string&) const noexcept {
             if (m_tok.size() + offset > len) {
-                return ScanState::Dismatch;
+                return ScanState::Mismatch;
             }
 
             //if (!m_tok.empty()) // ??? nop ?
@@ -658,7 +658,7 @@ namespace _LEXPARSER_CORE {
                 }
             }
 
-            return ScanState::Dismatch;
+            return ScanState::Mismatch;
         }
 
     private:
@@ -1142,7 +1142,7 @@ namespace _LEXPARSER_SHELL
                 ++offset;
                 return ScanState::OK;
             }
-            return ScanState::Dismatch;
+            return ScanState::Mismatch;
         }
 
         // 吃掉一批连续的白字符，总是成功
