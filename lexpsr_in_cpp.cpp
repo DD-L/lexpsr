@@ -1797,6 +1797,9 @@ void test_regex() {
 
 } // test_regex
 
+void bugfix_6();
+void bugfix_7();
+
 int main()
 {
     test_core();
@@ -1811,7 +1814,80 @@ int main()
     test_friendly_error();
     test_as_int();
     test_var_loop_cnt();
-    test_regex();
+    test_regex();  // 暂时没有考虑 \Q..\E 和 注释
+
+    //==================
+    bugfix_6(); // fix #6
+    bugfix_7(); // fix #7
 
     return 0;
+}
+
+void bugfix_6()
+{
+    using namespace lexpsr_shell;
+
+    std::vector<std::string> res;
+
+    psr(a) = "a" <<= [&res](const ActionArgs& args) {
+        res.push_back(args.m_action_material.m_token.to_std_string());
+        return true;
+    };
+
+    psr(b) = "b";
+    psr(c) = "c";
+    psr(r) = ((a, b)[at_least_1], any_char, c);
+
+    const std::string script = "abababac";
+
+    // Recognize parameters:
+    std::size_t offset = 0;
+    core::Context ctx;
+    std::string err;
+
+    core::ScanState ss = r.ScanScript(script.data(), script.size(), offset, ctx, err);
+    if (ScanState::OK != ss || script.size() != offset) {
+        std::cerr << err << std::endl;                              // Error message
+        std::cerr << ctx.ErrorPrompts(offset, script) << std::endl; // Error prompt details
+    }
+    else {
+        assert(ScanState::OK == ss && script.size() == offset);
+        auto res = InvokeActions(ctx, err);  // Trigger the callback action after being recognized successfully
+        if (!res.first) {
+            std::cerr << err << std::endl;
+        }
+    }
+
+    assert(res.size() == 3);
+} // bugfix_6
+
+void bugfix_7()
+{
+    using namespace lexpsr_shell;
+
+    decl_psr(branch) = $curry([branch = branch.weak()](const Parser& p0, const Parser& p1)->Parser {
+    //decl_psr(branch) = $curry([&branch](const Parser& p0, const Parser& p1) -> Parser {
+        return ((p0, branch.with_args(p0, p1)) | p1);
+    });
+    psr(root) = branch.with_args("de"_psr).with_args("ac"_psr);
+
+    const std::string script = "dededededeac";
+
+    // Recognize parameters:
+    std::size_t offset = 0;
+    core::Context ctx;
+    std::string err;
+
+    core::ScanState ss = root.ScanScript(script.data(), script.size(), offset, ctx, err);
+    if (ScanState::OK != ss || script.size() != offset) {
+        std::cerr << err << std::endl;                              // Error message
+        std::cerr << ctx.ErrorPrompts(offset, script) << std::endl; // Error prompt details
+    }
+    else {
+        assert(ScanState::OK == ss && script.size() == offset);
+        auto res = InvokeActions(ctx, err);  // Trigger the callback action after being recognized successfully
+        if (!res.first) {
+            std::cerr << err << std::endl;
+        }
+    }
 }
