@@ -1131,6 +1131,12 @@ namespace _LEXPARSER_SHELL
                 assert(nullptr != inner);
                 return *inner;
             }
+            else if (std::get_if<WeakPreDeclPsr>(&m_psr)) {  // fix #7
+                auto&& inner_weak = std::get<WeakPreDeclPsr>(m_psr);
+                auto inner = inner_weak.lock();
+                assert(nullptr != inner);
+                return *inner;
+            }
             return *this;
         }
 
