@@ -316,9 +316,11 @@ namespace _LEXPARSER_CORE {
             std::size_t loop_cnt = m_min;
             for (; loop_cnt < m_max; ++loop_cnt) {
                 oldOffset = offset;
+                std::size_t old_lazy_cnt = ctx.m_lazy_action.size();
                 ScanState ss = m_member(data, len, offset, ctx, err);
                 if (ScanState::Mismatch == ss) {
                     ctx.GoBackTo(offset, oldOffset);
+                    ctx.m_lazy_action.resize(old_lazy_cnt); // fix #6
                     break;
                 }
                 else if (ScanState::Fatal == ss) {// @TODO 致命错误，也当失配处理？
