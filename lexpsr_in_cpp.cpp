@@ -13,6 +13,8 @@
 #define LEXPSR_SHORT_KEYWORDS
 #include "lexpsr.h"
 
+// valgrind --tool=memcheck --leak-check=full
+
 int test_core()
 {
     using namespace lexpsr_core;
@@ -1184,8 +1186,15 @@ void test_regex() {
             m_ast_charset_stack.clear();
             m_ast_node_stack.clear();
             m_global_modifiers = 0;
+            m_commentsCnt      = 0;
+            ResetLiteralCharsetCnt();
 
             m_ast.Reset();
+        }
+
+        void ResetLiteralCharsetCnt() {
+            m_literal_charset_cnt = 1u;       // literal 字符集个数，默认为 1
+            m_literal_leading_word_bytes = 0; // 默认没有引导词
         }
 
         bool Finish() {
@@ -1210,6 +1219,9 @@ void test_regex() {
 
         RegexAST&                          m_ast;
         uint32_t                           m_global_modifiers = 0;
+        uint32_t                           m_commentsCnt      = 0;  // 注释的计数，用于修正 ac_seq 中的 loop_cnt
+        uint32_t                           m_literal_charset_cnt        = 1;  // literal 字符（集）个数
+        uint32_t                           m_literal_leading_word_bytes = 0;  // literal 引导词的长度，比如 \Q..\E 的引导词长度为 2
     }; // Context
     static const auto Ctx = [](core::Context& ctx) -> Context& { return static_cast<Context&>(ctx); };
 
@@ -1236,6 +1248,18 @@ void test_regex() {
         uint8_t res = (xx(first) << 4 | xx(second)) & 0xff;
         auto&& ctx = Ctx(args.m_contex);
         ctx.m_ast_charset_stack.push_back(ctx.m_ast.CreateSingleCharSet(res));
+        return true;
+    };
+
+    auto ac_qe_block_content = [](const ActionArgs& args) {
+        const core::StrRef& tok = args.m_action_material.m_token;
+        auto&& ctx = Ctx(args.m_contex);
+        for (std::size_t i = 0; i < tok.len; ++i) {
+            ctx.m_ast_charset_stack.push_back(ctx.m_ast.CreateSingleCharSet(tok[i]));
+        }
+        assert(tok.len <= UINT32_MAX);
+        ctx.m_literal_charset_cnt        = (uint32_t)tok.len; // \Q...\E 的字符（集）个数
+        ctx.m_literal_leading_word_bytes = 2u;                // \Q..\E 的引导词长度为 2 : '\Q' 两个字符
         return true;
     };
 
@@ -1400,12 +1424,34 @@ void test_regex() {
     auto ac_literal = [](const ActionArgs& args) {
         const core::StrRef& tok = args.m_action_material.m_token;
         auto&& ctx = Ctx(args.m_contex);
-        RegexAST::CharSet* cs = ctx.m_ast_charset_stack.back(); ctx.m_ast_charset_stack.pop_back();
-        if (ctx.m_global_modifiers & (uint32_t)Flag::CASELESS) {
-            cs->ToCastless();
+        assert(ctx.m_ast_charset_stack.size() >= ctx.m_literal_charset_cnt);
+        if (1u == ctx.m_literal_charset_cnt) { // literal 字符集个数为 1
+            RegexAST::CharSet* cs = ctx.m_ast_charset_stack.back(); ctx.m_ast_charset_stack.pop_back();
+            if (ctx.m_global_modifiers & (uint32_t)Flag::CASELESS) {
+                cs->ToCastless();
+            }
+            RegexAST::Node* node = ctx.m_ast.CreateNode(RegexAST::NodeType::CharSet, tok, cs);
+            ctx.m_ast_node_stack.push_back(node);
         }
-        RegexAST::Node* node = ctx.m_ast.CreateNode(RegexAST::NodeType::CharSet, tok, cs);
-        ctx.m_ast_node_stack.push_back(node);
+        else if (ctx.m_literal_charset_cnt > 1u){ // literal 字符集个数不为 1，（多字符）可以构成一个序列
+            const std::size_t hold_cnt = ctx.m_ast_charset_stack.size() - ctx.m_literal_charset_cnt;
+            RegexAST::Node* node = ctx.m_ast.CreateNode(RegexAST::NodeType::Sequence, tok);
+            ctx.m_ast_node_stack.push_back(node);
+            // add member
+            for (std::size_t i = 0; i < ctx.m_literal_charset_cnt; ++i) {
+                RegexAST::CharSet* cs = ctx.m_ast_charset_stack[hold_cnt + i];
+                if (ctx.m_global_modifiers & (uint32_t)Flag::CASELESS) {
+                    cs->ToCastless();
+                }
+                core::StrRef _tok = { tok.data + ctx.m_literal_leading_word_bytes + i, 1u }; // 一个 CharSet 对应着 一个字符， 还要考虑移除引导词
+                assert(_tok.data < tok.data + tok.len); // 不能越界
+                RegexAST::Node* charNode = ctx.m_ast.CreateNode(RegexAST::NodeType::CharSet, _tok, cs);
+                node->m_member.push_back(charNode);
+            }
+            ctx.m_ast_charset_stack.resize(hold_cnt);
+        } // else // 比如 \Q\E 可以构造出一共空的 literal，对于空的 literal 什么都不生成
+
+        ctx.ResetLiteralCharsetCnt();  // 重置 literal 字符集个数
         return true;
     };
 
@@ -1493,6 +1539,9 @@ void test_regex() {
         }
 
         // 循环体
+        if (ctx.m_ast_node_stack.empty()) {
+            return true; // 兼容空的循环体，比如 (\Q\E){2} 或 (){3,4}
+        }
         RegexAST::Node* body = ctx.m_ast_node_stack.back(); ctx.m_ast_node_stack.pop_back();
         RegexAST::Node* node = ctx.m_ast.CreateNode(RegexAST::NodeType::Loop, args.m_action_material.m_token);
         if (left_eq_right_range && less) { // 这四种情况是同构的： {n,n}? <=> {n}? <=> {n.n} <=> {n}
@@ -1505,10 +1554,22 @@ void test_regex() {
         ctx.m_ast_node_stack.push_back(node);
         return true;
     };
+    auto ac_comment = [](const ActionArgs& args) {
+        auto&& ctx = Ctx(args.m_contex);
+        ++ctx.m_commentsCnt; // 对注释计数，用于修正 ac_seq 的 loop_cnt
+        return true;
+    };
     auto ac_seq = [](const ActionArgs& args) {
         const core::StrRef& tok = args.m_action_material.m_token;
         auto&& ctx = Ctx(args.m_contex);
-        std::size_t loop_cnt = args.m_action_material.m_scanner_info;
+        assert(ctx.m_commentsCnt <= args.m_action_material.m_scanner_info);
+        std::size_t loop_cnt = args.m_action_material.m_scanner_info - ctx.m_commentsCnt; // 要排除掉注释的影响
+        ctx.m_commentsCnt = 0; // 注释计数用完立刻清零
+        if (ctx.m_ast_node_stack.empty())
+        { // 没有有效节点
+            assert(0u == loop_cnt || 1u == loop_cnt);
+            return true;
+        }
         assert(ctx.m_ast_node_stack.size() >= loop_cnt && loop_cnt >= 1u);
         if (1u == loop_cnt) { // 最小化
             ctx.m_ast_node_stack.back()->m_context = tok;
@@ -1537,7 +1598,10 @@ void test_regex() {
         assert(!ctx.m_branch_cnt_stack.empty());
         std::size_t branch_cnt = ctx.m_branch_cnt_stack.back() + 1u; ctx.m_branch_cnt_stack.pop_back();
         if (1u == branch_cnt) { // 最小化
-            ctx.m_ast_node_stack.back()->m_context = tok;
+            if (!ctx.m_ast_node_stack.empty())
+            {
+                ctx.m_ast_node_stack.back()->m_context = tok;
+            }
             return true;
         }
     
@@ -1553,12 +1617,40 @@ void test_regex() {
     };
 
     /////////////////////////
-    //   
+    // https://www.debuggex.com/cheatsheet/regex/pcre#/
+    // 
+    //                                                   PCRE regex quick reference:
+    //  [abx-z]        One character of: a, b, or the range x-z                     ^          Beginning of the string
+    //  [^abx-z]       One character except: a, b, or the range x-z                 $          End of the string
+    //  a|b            a or b                                                       \d         A digit (same as [0-9])
+    //  a?             Zero or one a's (greedy)                                     \D         A non-digit (same as [^0-9])
+    //  a??            Zero or one a's (lazy)                                       \w         A word character (same as [_a-zA-Z0-9])
+    //  a*             Zero or more a's (greedy)                                    \W         A non-word character (same as [^_a-zA-Z0-9])
+    //  a*?            Zero or more a's (lazy)                                      \s         A whitespace character
+    //  a+             One or more a's (greedy)                                     \S         A non-whitespace character
+    //  a+?            One or more a's (lazy)                                       \b         A word boundary
+    //  a{4}           Exactly 4 a's                                                \B         A non-word boundary
+    //  a{4,8}         Between (inclusive) 4 and 8 a's                              \n         A newline
+    //  a{9,}          9 or more a's                                                \t         A tab
+    //  (?>...)        An atomic group                                              \cY        The control character with the hex code Y
+    //  (?=...)        A positive lookahead                                         \xYY       The character with the hex code YY
+    //  (?!...)        A negative lookahead                                         \uYYYY     The character with the hex code YYYY
+    //  (?<=...)       A positive lookbehind                                        .          Any character
+    //  (?<!...)       A negative lookbehind                                        \Y         The Y'th captured group
+    //  (?:...)        A non-capturing group                                        (?1)       Recurse into numbered group 1
+    //  (...)          A capturing group                                            (?&x)      Recurse into named group x
+    //  (?P<n>...)     A capturing group named n                                    (?P=n)     The captured group named 'n'
+    //  \Q..\E         Remove special meaning                                       (?#...)    A comment (Escapes cannot be handled in comments)
+    // 
+    ///////////////////////////////////////////////////
+    // 
     //  root          = branch;
     //  branch        = seq ('|' seq)*; # 目前不允许空串
     //  seq           = loop+;
     //  loop          = (group | literal) loop_flag_opt;  # /a/ 等价与 /a{1}/
-    //  group         = '(' branch ')';
+    //  group         = '(' ('?' special_group | branch ')');
+    //  special_group = comment | fatal("This group syntax is not yet supported")
+    //  comment       = '#' (next_not(')') any_char)*  ')'
     //  loop_flag_opt = loop_flag ?;
     //  loop_flag     = ( '*' | '+' | '?' | loop_n | loop_mn | loop_m_comma | loop_comma_n ) loop_less_opt;
     //  loop_less_opt = '?'?;
@@ -1592,8 +1684,10 @@ void test_regex() {
     psr(alpha) = range('a', 'z')('A', 'Z')                                                                     <<= ac_char;
     psr(hex)   = (R"(\x)", ($digit('a', 'f')('A', 'F')[{2, 2}] | fatal_if(epsilon, "illegal hexadecimal"))     <<= ac_hex);
 
-    psr(escape_char_one_alpha) = (R"(\)", (set("tnvfr0dDsSwW" R"---(/\.^$*+?()[]{}|-)---") | fatal_if(epsilon, "unsupported escape character"))) // 多字符集 & 原样输出
-                                 <<= ac_escape_char_one_alpha;
+    psr(qe_block_content)      = (next_not(R"(\E)"), any_char)[any_cnt]                                        <<= ac_qe_block_content; // \Q..\E 内容原样输出
+    psr(qe_block)              = (R"(\Q)", qe_block_content, R"(\E)"_psr[at_most_1]);
+    psr(escape_char_one_alpha) = (R"(\)", (set("tnvfr0dDsSwW" R"---(/\.^$*+?()[]{}|-)---") | fatal_if(epsilon, "unsupported escape character")))   
+                                                                                      <<= ac_escape_char_one_alpha; // 多字符集 & 原样输出
 
     decl_psr(char_range_boundary);
 
@@ -1602,7 +1696,7 @@ void test_regex() {
     psr(negative_flag_opt) = "^"_psr[at_most_1]                                       <<= ac_negative_flag_opt; // ("^" | epsilon) 可以省掉一个 stack @TODO
     psr(punct_char)        = set(R"---( -<>&:!"'#%,;=@_`~}])---")                     <<= ac_char;
     psr(not0x5d)           = negative_set("]")                                        <<= ac_not0x5d;
-    psr(escape_char)       = hex | escape_char_one_alpha;
+    psr(escape_char)       = hex | qe_block | escape_char_one_alpha;
     char_range_boundary    = escape_char | not0x5d;
 
     psr(charset_content)   = (char_range | char_range_boundary)[any_cnt]              <<= ac_charset_content;
@@ -1628,13 +1722,16 @@ void test_regex() {
     fatal_nothing2repeat = fatal_if(loop_flag, "nothing to repeat");
     psr(loop_flag_opt) = loop_flag[at_most_1] <<= ac_loop_flag_opt;  // 这里可以实现成  loop_flag | epsilon 这样就可以省掉一个 stack @TODO
 
+    psr(comment)       = ("#", (next_not(")"), any_char)[any_cnt], ")")    <<= ac_comment;
+    psr(special_group) = comment | fatal_if(epsilon, "This group syntax is not yet supported");
+
     decl_psr(group);
 
     psr(loop)   = ((group.weak() | literal), loop_flag_opt)                <<= ac_loop;
     psr(seq)    = loop[at_least_1]                                         <<= ac_seq;
     psr(branch) = (seq, ("|", seq)[any_cnt] <<= ac_branch_follow_up)       <<= ac_branch;
 
-    group = ("(", branch, ")");
+    group = ("(", (("?", special_group) | (branch, ")")));
     psr(root) = branch;
 
     ////////////////// end parser ///////////////////
@@ -1657,6 +1754,7 @@ void test_regex() {
     };
     // S: Seq; B: Branch; L: Loop; C: CharSet
     std::vector<Case> correct_expressions = {
+
         { "[abC123]",        0, R"===({C:"1-3,C,a-b"})===" },
         { "[^0-9_123]",      0, R"===({C:"0x00-0x2f,0x3a-0x5e,0x60-0xff"})===" },
         { "[a-z][^0-9_123]", 0, R"===({S:[{C:"a-z"},{C:"0x00-0x2f,0x3a-0x5e,0x60-0xff"}]})===" },
@@ -1737,8 +1835,25 @@ void test_regex() {
         // 特殊字符 
         { R"=(]})=",      0, R"===({S:[{C:"0x5d"},{C:"0x7d"}]})===" },
         { R"=(.{1,3}})=", 0, R"===({S:[{"L 1,3":[{C:"0x00-0xff"}]},{C:"0x7d"}]})===" },
+
+        // 注释 (?#  commment )
+        { R"=((?#comment\)a(?#)b(?#comment)c)=", 0, R"===({S:[{C:"a"},{C:"b"},{C:"c"}]})===" },   // 注释中不能包含右括号
+        { R"=((?#)(?#comment))=", 0, R"===()===" },   // 测试空正则
+
+        // \Q..\E
+        { R"=(a\Q\Q{1,2}[a-z]\n\\Eb?)=", 0, 
+             // 此 case 未合并两个相邻的 Seq
+             R"===({S:[{C:"a"},{S:[{C:"0x5c"},{C:"Q"},{C:"0x7b"},{C:"1"},{C:"0x2c"},{C:"2"},{C:"0x7d"},{C:"0x5b"},{C:"a"},{C:"0x2d"},{C:"z"},{C:"0x5d"},{C:"0x5c"},{C:"n"},{C:"0x5c"}]},{"L 0,1":[{C:"b"}]}]})===" },  // 
+        { R"=(\Qab.c\E)=",               0 | Flag::CASELESS,   R"===({S:[{C:"A,a"},{C:"B,b"},{C:"0x2e"},{C:"C,c"}]})===" },  // 测试忽略大小写
+        { R"=(\Q.*[1-5]\x2E)=",          0,                    R"===({S:[{C:"0x2e"},{C:"0x2a"},{C:"0x5b"},{C:"1"},{C:"0x2d"},{C:"5"},{C:"0x5d"},{C:"0x5c"},{C:"x"},{C:"2"},{C:"E"}]})===" },  // 测试无 \E 右边界
+        { R"=(\Q\E)=",                   0,                    R"===()===" },  // 测试 空串
+        { R"=(\Q)=",                     0,                    R"===()===" },  // 测试无 \E 右边界的 空串
+        { R"=((\Q\E){2,3})=",            0,                    R"===()===" },  // 测试空循环体
     };
 
+    // TODO Lists:
+    //  1. 合并两个相邻的 Seq 
+    //  2. 合并两个相邻的 Branch
     for (const Case& cs : correct_expressions) {
         reset();
         ctx.m_global_modifiers = cs.flag;
@@ -1814,7 +1929,7 @@ int main()
     test_friendly_error();
     test_as_int();
     test_var_loop_cnt();
-    test_regex();  // 暂时没有考虑 \Q..\E 和 注释
+    test_regex();  // 暂时没有考虑 \Q..\E
 
     //==================
     bugfix_6(); // fix #6
