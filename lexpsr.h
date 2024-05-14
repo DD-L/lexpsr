@@ -1049,8 +1049,7 @@ namespace _LEXPARSER_SHELL
         Parser operator[](details::LoopCntPair pair) const {
             return Parser(LoopPsr{ *this, pair.first, pair.second });
         }
-
-#if (__cplusplus > 202300) || (defined(_MSC_VER) && (_MSC_VER > 1938))
+#if defined(__cpp_multidimensional_subscript) || (__cplusplus > 202300)
         Parser operator[](std::size_t _min, std::size_t _max) const { // C++ 23
             return (*this)[details::LoopCntPair{ _min , _max }];
         }
