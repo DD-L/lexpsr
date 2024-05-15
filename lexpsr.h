@@ -544,9 +544,13 @@ namespace _LEXPARSER_CORE {
     namespace details {
         typedef std::pair<char, char> Range;
         using  range_arg_t = void(*)(Range*);
+        using  negative_arg_t = void(*)(range_arg_t);
     } // namespace details
 
-    namespace { void range_v(details::Range*) {} }
+    namespace {
+        void range_v(details::Range*) {}
+        void negative_v(details::range_arg_t) {}
+    }
 
     class CharBranch : public details::DefaultClass {
     public:
@@ -582,13 +586,13 @@ namespace _LEXPARSER_CORE {
             AddMember(range_v, range);
         }
 
-        explicit CharBranch(details::range_arg_t, bool negative, const Range& range) { // negative_range
+        explicit CharBranch(details::range_arg_t, details::negative_arg_t, const Range& range) { // negative_range
             assert((uint8_t)range.first <= (uint8_t)range.second);
             if (0 < (uint8_t)range.first) {
-                AddMember(range_v, Range(0, char((uint8_t)(range.first) - 1u)));
+                AddMember(range_v, Range(static_cast<char>(0), static_cast<char>((uint8_t)(range.first) - 1u)));
             }
             if ((uint8_t)range.second < uint8_t(~static_cast<uint8_t>(0))) {
-                AddMember(range_v, Range(char((uint8_t)range.second + 1u), char(~static_cast<uint8_t>(0))));
+                AddMember(range_v, Range(static_cast<char>((uint8_t)range.second + 1u), static_cast<char>(~static_cast<uint8_t>(0))));
             }
         }
 
@@ -1278,7 +1282,7 @@ namespace _LEXPARSER_SHELL
         }
 
         [[maybe_unused]] Parser negative_range(char b, char e) {
-            return Parser(CharSetPsr(core::range_v, true, std::make_pair(b, e)));
+            return Parser(CharSetPsr(core::range_v, core::negative_v, std::make_pair(b, e)));
         }
 
         [[maybe_unused]] Parser negative_range(const std::pair<char, char>& pair) {
@@ -1318,14 +1322,14 @@ namespace _LEXPARSER_SHELL
             }
         }
 
-        [[maybe_unused]] const Parser  epsilon = Parser(NopPsr(), "epsilon");       // `epsilon` 永远成功，等价于 nop ???
+        [[maybe_unused]] const Parser  epsilon = Parser(NopPsr(), "epsilon");                          // `epsilon` 永远成功，等价于 nop
         [[maybe_unused]] const Parser& nop     = epsilon;
-        [[maybe_unused]] const Parser _false   = next_not(nop).set_name("_false");  // `_false`，永远失配
-        [[maybe_unused]] const Parser ws(Scanner(Parser::EatWs), "ws");             // ws  吃掉一个白字符，失败返回失配
-        [[maybe_unused]] const Parser wss(Scanner(Parser::EatWss), "wss");          // wss 吃掉一批连续的白字符，永远成功
-        [[maybe_unused]] const Parser utf8bom(StrPsr{ "\xEF\xBB\xBF" }, "utf8bom"); // UTF-8 编码的 BOM 头，通常这样使用：(utf8bom | epsilon), 或 ignore_utf8bom
-        [[maybe_unused]] const Parser ignore_utf8bom(utf8bom | epsilon);            // 可表达 UTF-8 BOM 头允许被忽略的 psr
-        [[maybe_unused]] const Parser any_char = range(0, char(0xff));              // 任意单个字符，等价于正则表达式中的 /[\x00-\xff]/
+        [[maybe_unused]] const Parser _false   = next_not(nop).set_name("_false");                     // `_false`，永远失配
+        [[maybe_unused]] const Parser ws(Scanner(Parser::EatWs), "ws");                                // ws  吃掉一个白字符，失败返回失配
+        [[maybe_unused]] const Parser wss(Scanner(Parser::EatWss), "wss");                             // wss 吃掉一批连续的白字符，永远成功
+        [[maybe_unused]] const Parser utf8bom(StrPsr{ "\xEF\xBB\xBF" }, "utf8bom");                    // UTF-8 编码的 BOM 头，通常这样使用：(utf8bom | epsilon), 或 ignore_utf8bom
+        [[maybe_unused]] const Parser ignore_utf8bom(utf8bom | epsilon);                               // 可表达 UTF-8 BOM 头允许被忽略的 psr
+        [[maybe_unused]] const Parser any_char = range(static_cast<char>(0), static_cast<char>(0xff)); // 任意单个字符，等价于正则表达式中的 /[\x00-\xff]/
 
         template <class Op, class Int1, class Int2,
             class = typename std::enable_if<details::IsInt<Int1>::value && details::IsInt<Int2>::value>::type>
