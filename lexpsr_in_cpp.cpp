@@ -1194,7 +1194,7 @@ void test_regex() {
 
         void ResetLiteralCharsetCnt() {
             m_literal_charset_cnt = 1u;       // literal 字符集个数，默认为 1
-            m_literal_leading_word_bytes = 0; // 默认没有引导词
+            m_literal_leading_word_bytes = 0; // literal 默认没有引导词
         }
 
         bool Finish() {
@@ -1563,7 +1563,7 @@ void test_regex() {
         const core::StrRef& tok = args.m_action_material.m_token;
         auto&& ctx = Ctx(args.m_contex);
         assert(ctx.m_commentsCnt <= args.m_action_material.m_scanner_info);
-        std::size_t loop_cnt = args.m_action_material.m_scanner_info - ctx.m_commentsCnt; // 要排除掉注释的影响
+        const std::size_t loop_cnt = args.m_action_material.m_scanner_info - ctx.m_commentsCnt; // 要排除掉注释的影响
         ctx.m_commentsCnt = 0; // 注释计数用完立刻清零
         if (ctx.m_ast_node_stack.empty())
         { // 没有有效节点
@@ -1575,14 +1575,22 @@ void test_regex() {
             ctx.m_ast_node_stack.back()->m_context = tok;
             return true;
         }
+
         assert(ctx.m_ast_node_stack.size() >= loop_cnt);
         const std::size_t hold_cnt = ctx.m_ast_node_stack.size() - loop_cnt;
-        RegexAST::Node* node = ctx.m_ast.CreateNode(RegexAST::NodeType::Sequence, tok);
-
-        // add member
-        node->m_member.insert(node->m_member.end(), ctx.m_ast_node_stack.begin() + hold_cnt, ctx.m_ast_node_stack.end());
+        RegexAST::Node* seq = ctx.m_ast.CreateNode(RegexAST::NodeType::Sequence, tok);
+        for (std::size_t i = 0; i < loop_cnt; ++i) {
+            RegexAST::Node* node = ctx.m_ast_node_stack[hold_cnt + i];
+            assert(nullptr != node);
+            if (RegexAST::NodeType::Sequence == node->m_type) { // 合并相邻的 Seq
+                seq->m_member.insert(seq->m_member.end(), node->m_member.begin(), node->m_member.end());
+            }
+            else {
+                seq->m_member.push_back(node);
+            }
+        }
         ctx.m_ast_node_stack.resize(hold_cnt);
-        ctx.m_ast_node_stack.push_back(node);
+        ctx.m_ast_node_stack.push_back(seq);
         return true;
     };
 
@@ -1607,12 +1615,19 @@ void test_regex() {
     
         assert(ctx.m_ast_node_stack.size() >= branch_cnt);
         const std::size_t hold_cnt = ctx.m_ast_node_stack.size() - branch_cnt;
-        RegexAST::Node* node = ctx.m_ast.CreateNode(RegexAST::NodeType::Branch, tok);
-
-        // add member
-        node->m_member.insert(node->m_member.end(), ctx.m_ast_node_stack.begin() + hold_cnt, ctx.m_ast_node_stack.end());
+        RegexAST::Node* branch = ctx.m_ast.CreateNode(RegexAST::NodeType::Branch, tok);
+        for (std::size_t i = 0; i < branch_cnt; ++i) {
+            RegexAST::Node* node = ctx.m_ast_node_stack[hold_cnt + i];
+            assert(nullptr != node);
+            if (RegexAST::NodeType::Branch == node->m_type) { // 合并相邻的 Branch
+                branch->m_member.insert(branch->m_member.end(), node->m_member.begin(), node->m_member.end());
+            }
+            else {
+                branch->m_member.push_back(node);
+            }
+        }
         ctx.m_ast_node_stack.resize(hold_cnt);
-        ctx.m_ast_node_stack.push_back(node);
+        ctx.m_ast_node_stack.push_back(branch);
         return true;
     };
 
@@ -1668,11 +1683,12 @@ void test_regex() {
     //  char_range_boundary = escape_char | not0x5d;      # not0x5d 必须在最后，让前面短路它
     //  not0x5d             = /[^\]]/;
     //  
-    //  escape_char           = hex | escape_char_one_alpha;
+    //  escape_char           = hex | qe_block | escape_char_one_alpha;
     //  escape_char_one_alpha = '\' set(
     //                            "tnvfr0dDsSwW"                # 字符集（缩写）
     //                            R"---(/\.^$*+?()[]{}|-)---"   # 原样输出
     //                           ); # @TODO 解耦写法 _r : 'r' ... 但没必要
+    //  qe_block              = '\Q' (next_not('\E') .)* '\E'
     //  char_range            = char_range_boundary '-' char_range_boundary;   # 比如 [\x00-xff] 应当与 [\x00-x]|f 同构
     //  hex   = $hex();
     //  alpha = $alpha();
@@ -1783,8 +1799,9 @@ void test_regex() {
         { "230-.{,2000}",    0, R"===({S:[{C:"2"},{C:"3"},{C:"0"},{C:"0x2d"},{"L 0,2000":[{C:"0x00-0xff"}]}]})===" },
         { "(230-.{,2000})",  0, R"===({S:[{C:"2"},{C:"3"},{C:"0"},{C:"0x2d"},{"L 0,2000":[{C:"0x00-0xff"}]}]})===" },
         { "(230-.{,2000})?", 0, R"===({"L 0,1":[{S:[{C:"2"},{C:"3"},{C:"0"},{C:"0x2d"},{"L 0,2000":[{C:"0x00-0xff"}]}]}]})===" },
-        { R"=((230-.{,2000})?(230\s).*?\r\n)=", 0, 
-        R"===({S:[{"L 0,1":[{S:[{C:"2"},{C:"3"},{C:"0"},{C:"0x2d"},{"L 0,2000":[{C:"0x00-0xff"}]}]}]},{S:[{C:"2"},{C:"3"},{C:"0"},{C:"0x09-0x0d,0x20"}]},{"L 0,INF less":[{C:"0x00-0xff"}]},{C:"0x0d"},{C:"0x0a"}]})===" },
+        { R"=((230-.{,2000})?(230\s).*?\r\n)=", 0,
+           //R"===({S:[{"L 0,1":[{S:[{C:"2"},{C:"3"},{C:"0"},{C:"0x2d"},{"L 0,2000":[{C:"0x00-0xff"}]}]}]},{S:[{C:"2"},{C:"3"},{C:"0"},{C:"0x09-0x0d,0x20"}]},{"L 0,INF less":[{C:"0x00-0xff"}]},{C:"0x0d"},{C:"0x0a"}]})===" },
+           R"===({S:[{"L 0,1":[{S:[{C:"2"},{C:"3"},{C:"0"},{C:"0x2d"},{"L 0,2000":[{C:"0x00-0xff"}]}]}]},{C:"2"},{C:"3"},{C:"0"},{C:"0x09-0x0d,0x20"},{"L 0,INF less":[{C:"0x00-0xff"}]},{C:"0x0d"},{C:"0x0a"}]})===" }, // Seq 做了合并
         { "a[/]c",           0, R"===({S:[{C:"a"},{C:"0x2f"},{C:"c"}]})===" },
         { R"=(a[\/]c)=",     0, R"===({S:[{C:"a"},{C:"0x2f"},{C:"c"}]})===" },
         { R"=([\S]\s)=",     0, R"===({S:[{C:"0x00-0x08,0x0e-0x1f,0x21-0xff"},{C:"0x09-0x0d,0x20"}]})===" },
@@ -1798,52 +1815,58 @@ void test_regex() {
         { R"=([^\D\S])=",    0, R"===({C:""})===" },
         { R"=([^\Dabc])=",   0, R"===({C:"0-9"})===" },
         { R"=(\xff\x00[][^])=", 0, R"===({S:[{C:"0xff"},{C:"0x00"},{C:""},{C:"0x00-0xff"}]})===" },
-        
+
         // 注意这里的循环
         { R"=(.*abc)=",           0, R"===({S:[{"L 0,INF":[{C:"0x00-0xff"}]},{C:"a"},{C:"b"},{C:"c"}]})===" },
         { R"=(.*?abc)=",          0, R"===({S:[{"L 0,INF less":[{C:"0x00-0xff"}]},{C:"a"},{C:"b"},{C:"c"}]})===" },
-        { R"=(.*(abc))=",         0, R"===({S:[{"L 0,INF":[{C:"0x00-0xff"}]},{S:[{C:"a"},{C:"b"},{C:"c"}]}]})===" },
-        { R"=(.{2,100}(abc))=",   0, R"===({S:[{"L 2,100":[{C:"0x00-0xff"}]},{S:[{C:"a"},{C:"b"},{C:"c"}]}]})===" },
-        
+        { R"=(.*(abc))=",         0, R"===({S:[{"L 0,INF":[{C:"0x00-0xff"}]},{C:"a"},{C:"b"},{C:"c"}]})===" }, // Seq 做了合并
+        { R"=(.{2,100}(abc))=",   0, R"===({S:[{"L 2,100":[{C:"0x00-0xff"}]},{C:"a"},{C:"b"},{C:"c"}]})===" }, // Seq 做了合并
+
         //// 分支
         { R"=(((abc)|[\D])*)=",   0, R"===({"L 0,INF":[{B:[{S:[{C:"a"},{C:"b"},{C:"c"}]},{C:"0x00-0x2f,0x3a-0xff"}]}]})===" },
-        
+
         // 忽略大小写
         { R"=([^\x00-\x60\x7b-\xff])=",  0 | Flag::CASELESS, R"===({C:"A-Z,a-z"})===" }, // [a-z]/i
         { R"=([^\x00-\x40\x5b-\xff])=",  0 | Flag::CASELESS, R"===({C:"A-Z,a-z"})===" }, // [A-Z]/i
         { R"=([abC123]abC123)=",         0 | Flag::CASELESS, R"===({S:[{C:"1-3,A-C,a-c"},{C:"A,a"},{C:"B,b"},{C:"C,c"},{C:"1"},{C:"2"},{C:"3"}]})===" },
         { R"=([a-b]C123)=",              0 | Flag::CASELESS, R"===({S:[{C:"A-B,a-b"},{C:"C,c"},{C:"1"},{C:"2"},{C:"3"}]})===" },
-    
+
         // dot 不匹配所有: 1. 字符集中的[.] 不被当做元字符处理 2. 启用 DOT_NOT_ALL 不匹配 '\r' 和 '\n' （区别于 hyperscan）
         { R"=([.].)=", 0 | Flag::DOT_NOT_ALL, R"===({S:[{C:"0x2e"},{C:"0x00-0x09,0x0b-0x0c,0x0e-0xff"}]})===" },
 
         // 混合 flags
         { R"=([.abC].abc)=", Flag::CASELESS | Flag::DOT_NOT_ALL, R"===({S:[{C:"0x2e,A-C,a-c"},{C:"0x00-0x09,0x0b-0x0c,0x0e-0xff"},{C:"A,a"},{C:"B,b"},{C:"C,c"}]})===" },
-        
+
         // charset
         { R"=([--]])=",    0,  R"===({S:[{C:"0x2d"},{C:"0x5d"}]})===" },
         { R"=([%-9])=",    0,  R"===({C:"0x25-9"})===" },
         { R"=([\x00--])=", 0,  R"===({C:"0x00-0x2d"})===" },
         { R"=([--9])=",    0,  R"===({C:"0x2d-9"})===" },
         { R"=([---])=",    0,  R"===({C:"0x2d"})===" },
-         
+
         // 漏掉一个 '\'
         { R"=([^\x00-x60\x7b-\xff])=", 0, R"===({C:"y-z"})===" },
         { R"=([\x00-xff])=",           0, R"===({C:"0x00-x"})===" },
         { R"=([\x00-x]|f)=",           0, R"===({B:[{C:"0x00-x"},{C:"f"}]})===" },
-        
+
         // 特殊字符 
         { R"=(]})=",      0, R"===({S:[{C:"0x5d"},{C:"0x7d"}]})===" },
         { R"=(.{1,3}})=", 0, R"===({S:[{"L 1,3":[{C:"0x00-0xff"}]},{C:"0x7d"}]})===" },
+
+        // 测试 Seq 合并
+        { R"=(\Qabc\Ed)=", 0, R"===({S:[{C:"a"},{C:"b"},{C:"c"},{C:"d"}]})===" },
+        { R"=(\Qabc\Ed\Qe\E\Qfg\E(hi))=", 0, R"===({S:[{C:"a"},{C:"b"},{C:"c"},{C:"d"},{C:"e"},{C:"f"},{C:"g"},{C:"h"},{C:"i"}]})===" },
+
+        // 测试 Branch 合并
+        { R"=(a|(b|cd)|e)=", 0, R"===({B:[{C:"a"},{C:"b"},{S:[{C:"c"},{C:"d"}]},{C:"e"}]})==="},
 
         // 注释 (?#  commment )
         { R"=((?#comment\)a(?#)b(?#comment)c)=", 0, R"===({S:[{C:"a"},{C:"b"},{C:"c"}]})===" },   // 注释中不能包含右括号
         { R"=((?#)(?#comment))=", 0, R"===()===" },   // 测试空正则
 
         // \Q..\E
-        { R"=(a\Q\Q{1,2}[a-z]\n\\Eb?)=", 0, 
-             // 此 case 未合并两个相邻的 Seq
-             R"===({S:[{C:"a"},{S:[{C:"0x5c"},{C:"Q"},{C:"0x7b"},{C:"1"},{C:"0x2c"},{C:"2"},{C:"0x7d"},{C:"0x5b"},{C:"a"},{C:"0x2d"},{C:"z"},{C:"0x5d"},{C:"0x5c"},{C:"n"},{C:"0x5c"}]},{"L 0,1":[{C:"b"}]}]})===" },  // 
+        { R"=(a\Q\Q{1,2}[a-z]\n\\Eb?)=", 0,
+             R"===({S:[{C:"a"},{C:"0x5c"},{C:"Q"},{C:"0x7b"},{C:"1"},{C:"0x2c"},{C:"2"},{C:"0x7d"},{C:"0x5b"},{C:"a"},{C:"0x2d"},{C:"z"},{C:"0x5d"},{C:"0x5c"},{C:"n"},{C:"0x5c"},{"L 0,1":[{C:"b"}]}]})===" },
         { R"=(\Qab.c\E)=",               0 | Flag::CASELESS,   R"===({S:[{C:"A,a"},{C:"B,b"},{C:"0x2e"},{C:"C,c"}]})===" },  // 测试忽略大小写
         { R"=(\Q.*[1-5]\x2E)=",          0,                    R"===({S:[{C:"0x2e"},{C:"0x2a"},{C:"0x5b"},{C:"1"},{C:"0x2d"},{C:"5"},{C:"0x5d"},{C:"0x5c"},{C:"x"},{C:"2"},{C:"E"}]})===" },  // 测试无 \E 右边界
         { R"=(\Q\E)=",                   0,                    R"===()===" },  // 测试 空串
@@ -1852,8 +1875,7 @@ void test_regex() {
     };
 
     // TODO Lists:
-    //  1. 合并两个相邻的 Seq 
-    //  2. 合并两个相邻的 Branch
+    //  1. 合并两个相邻的 Loop ? (有必要?)
     for (const Case& cs : correct_expressions) {
         reset();
         ctx.m_global_modifiers = cs.flag;
@@ -1929,7 +1951,7 @@ int main()
     test_friendly_error();
     test_as_int();
     test_var_loop_cnt();
-    test_regex();  // 暂时没有考虑 \Q..\E
+    test_regex();
 
     //==================
     bugfix_6(); // fix #6
@@ -1967,8 +1989,8 @@ void bugfix_6()
     }
     else {
         assert(ScanState::OK == ss && script.size() == offset);
-        auto res = InvokeActions(ctx, err);  // Trigger the callback action after being recognized successfully
-        if (!res.first) {
+        auto _res = InvokeActions(ctx, err);  // Trigger the callback action after being recognized successfully
+        if (!_res.first) {
             std::cerr << err << std::endl;
         }
     }
