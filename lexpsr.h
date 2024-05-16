@@ -388,7 +388,7 @@ namespace _LEXPARSER_CORE {
     class FatalIf {
     public:
         template <class Scanner>
-        explicit FatalIf(Scanner&& scanner, const std::string& err_msg) : m_scanner(std::forward<Scanner>(scanner)), m_err_msg(err_msg) {}
+        FatalIf(Scanner&& scanner, const std::string& err_msg) : m_scanner(std::forward<Scanner>(scanner)), m_err_msg(err_msg) {}
 
         FatalIf(const FatalIf&) = default;
         FatalIf(FatalIf&&) = default;
@@ -576,17 +576,17 @@ namespace _LEXPARSER_CORE {
             }
         }
 
-        explicit CharBranch(details::range_arg_t, const std::vector<Range>& ranges) { // range
+        CharBranch(details::range_arg_t, const std::vector<Range>& ranges) { // range
             for (const Range& range : ranges) {
                 AddMember(range_v, range);
             }
         }
 
-        explicit CharBranch(details::range_arg_t, const Range& range) { // range
+        CharBranch(details::range_arg_t, const Range& range) { // range
             AddMember(range_v, range);
         }
 
-        explicit CharBranch(details::range_arg_t, details::negative_arg_t, const Range& range) { // negative_range
+        CharBranch(details::range_arg_t, details::negative_arg_t, const Range& range) { // negative_range
             assert((uint8_t)range.first <= (uint8_t)range.second);
             if (0 < (uint8_t)range.first) {
                 AddMember(range_v, Range(static_cast<char>(0), static_cast<char>((uint8_t)(range.first) - 1u)));
