@@ -18,13 +18,13 @@ typedef uint64_t State;
 typedef int32_t  Edge;
 
 template <class T>
-class ordered_uniqe_vec;
+class ordered_unique_vec;
 
 template <class T>
-static inline ordered_uniqe_vec<T>& make_ordered_unique_mut_vec(std::vector<T>& vec);
+static inline ordered_unique_vec<T>& make_ordered_unique_mut_vec(std::vector<T>& vec);
 
 template <class T>
-class ordered_uniqe_vec : public std::vector<T> {
+class ordered_unique_vec : public std::vector<T> {
     typedef std::vector<T> base_type;
 public:
     using base_type::vector;
@@ -50,7 +50,7 @@ public:
         ordered_insert(base_type::end(), vec.begin(), vec.end());
     }
 
-    void ordered_insert(const ordered_uniqe_vec<T>& vec) {
+    void ordered_insert(const ordered_unique_vec<T>& vec) {
         ordered_insert(static_cast<const base_type&>(vec));
     }
 
@@ -59,7 +59,7 @@ public:
         static_cast<base_type&>(*this) = std::forward<Vec>(vec);
         make_ordered_unique_mut_vec(*this);
     }
-}; // class ordered_uniqe_vec<T>
+}; // class ordered_unique_vec<T>
 
 constexpr Edge  epsilon = -1;
 constexpr State invalid_state = ~static_cast<State>(0);
@@ -69,7 +69,7 @@ static constexpr inline bool valid_edge(Edge e) {
 }
 
 template <class T>
-static inline ordered_uniqe_vec<T>& make_ordered_unique_mut_vec(std::vector<T>& vec) {
+static inline ordered_unique_vec<T>& make_ordered_unique_mut_vec(std::vector<T>& vec) {
     if (vec.size() > 1u) {
         std::sort(vec.begin(), vec.end());
         auto last = std::unique(vec.begin(), vec.end());
@@ -77,7 +77,7 @@ static inline ordered_uniqe_vec<T>& make_ordered_unique_mut_vec(std::vector<T>& 
         const std::size_t size = std::distance(vec.begin(), last);
         vec.resize(size);
     }
-    return static_cast<ordered_uniqe_vec<T>&>(vec);
+    return static_cast<ordered_unique_vec<T>&>(vec);
 }
 
 namespace details {
@@ -111,21 +111,14 @@ namespace details {
             }
         };
 
-        struct equal {
-            bool operator()(const state_pair_t& sft1, const state_pair_t& sft2) const {
-                return sft1.s1 == sft2.s1 && sft1.s2 == sft2.s2;
-            }
-        };
+        bool operator==(const state_pair_t& that) const { // fix g++ (GCC) 11.3.0 : map1 == map2
+            return s1 == that.s1 && s2 == that.s2;
+        }
     };
 
     typedef state_pair_t state_from_to_t;
-
-    typedef std::unordered_map<
-        state_from_to_t, ordered_uniqe_vec<Edge>,
-        state_from_to_t::hash, state_from_to_t::equal>
-    state_pair_map_t;
-
-    typedef std::unordered_map<Edge, ordered_uniqe_vec<State>> edge_to_states_t;
+    typedef std::unordered_map<state_from_to_t, ordered_unique_vec<Edge>, state_from_to_t::hash> state_pair_map_t;
+    typedef std::unordered_map<Edge, ordered_unique_vec<State>> edge_to_states_t;
     typedef std::unordered_map<State, std::unordered_map<Edge, State>>  dfa_move_functions_t;
 
     class FABase {
@@ -157,7 +150,7 @@ namespace details {
             return state_name;
         }
 
-        std::string get_edges_string(const ordered_uniqe_vec<Edge>& edges_set) const {
+        std::string get_edges_string(const ordered_unique_vec<Edge>& edges_set) const {
             if (edges_set.empty()) {
                 return {};
             }
@@ -194,7 +187,7 @@ namespace details {
         }
 
         std::string get_edges_string(const std::unordered_set<Edge>& edges) const {
-            ordered_uniqe_vec<Edge> edges_vec(edges.begin(), edges.end());
+            ordered_unique_vec<Edge> edges_vec(edges.begin(), edges.end());
             return get_edges_string(edges_vec);
         }
 
@@ -256,7 +249,7 @@ namespace details {
             return "```mermaid" + std::string(endline) + "graph TD;" + endline + ret + "```";
         }
 
-        void reset(State start_state, ordered_uniqe_vec<State>&& final_states) {
+        void reset(State start_state, ordered_unique_vec<State>&& final_states) {
             m_start_state = start_state;
             if (&m_final_states != &final_states) { // fix g++ (GCC) https://godbolt.org/z/b4x9PhWcd
                 m_final_states = std::move(final_states);
@@ -270,7 +263,7 @@ namespace details {
 
     protected:
         State                       m_start_state = invalid_state;
-        ordered_uniqe_vec<State>    m_final_states;
+        ordered_unique_vec<State>    m_final_states;
     }; // class FABase
 } // namespace details
 
@@ -351,7 +344,7 @@ class DFA : public details::FABase
             return  { _v }; // BUG
         }
 
-        std::unordered_map<state_pair_t, cached_value, state_pair_t::hash, state_pair_t::equal> m_cache;
+        std::unordered_map<state_pair_t, cached_value, state_pair_t::hash> m_cache;
     }; // merged_states_cache_t
 
 public:
@@ -364,7 +357,7 @@ public:
     }
 
     std::string to_mermaid(const char* endline = "\n") const {
-        return to_mermaid_impl(m_state_pair_map, endline, [this](const ordered_uniqe_vec<Edge>& edges) {
+        return to_mermaid_impl(m_state_pair_map, endline, [this](const ordered_unique_vec<Edge>& edges) {
             return get_edges_string(edges);
         });
     }
@@ -433,7 +426,7 @@ public:
     }
 
 public:
-    void reset(State start_state, state_pair_map_t&& state_pair_map, ordered_uniqe_vec<State>&& final_states,
+    void reset(State start_state, state_pair_map_t&& state_pair_map, ordered_unique_vec<State>&& final_states,
          std::unordered_set<State>&& state_set, move_functions_t&& move_functions) {
         details::FABase::reset(start_state, std::move(final_states));
         if (&m_state_pair_map != &state_pair_map) { // fix g++ (GCC) < 11.1
@@ -452,6 +445,34 @@ public:
         m_state_pair_map.clear();
     }
 
+    bool is_same_shape_mut(DFA& that) { // 判断是否形状相同，但对状态数值没有要求 （此方法可能有副作用）
+        if (m_state_set.empty() && that.m_state_set.empty()) { return true; }
+        if (m_state_set.size() != that.m_state_set.size() || m_final_states.size() != that.m_final_states.size()) {
+            return false;
+        }
+
+        if (!m_move_functions.empty() && !that.m_move_functions.empty()) {
+            if (m_move_functions.size() != that.m_move_functions.size()) { return false; }
+            if (m_move_functions == that.m_move_functions && m_final_states == that.m_final_states) { return true; }
+
+            std::unordered_map<State, State> state_map;
+            if (compare_move_functions(m_start_state, m_move_functions, that.m_start_state, that.m_move_functions, state_map)) {
+                return compare_final_states(m_final_states, that.m_final_states, state_map);
+            }
+            return false;
+        }
+
+        if (!m_state_pair_map.empty() && !that.m_state_pair_map.empty()) {
+            if (m_state_pair_map.size() != that.m_state_pair_map.size()) { return false; }
+            if (m_state_pair_map == that.m_state_pair_map && m_final_states == that.m_final_states) { return true; }
+        }
+
+        gen_move_functions_from_state_pair_map(); // 有副作用
+        that.gen_move_functions_from_state_pair_map(); // 有副作用
+
+        return is_same_shape_mut(that);
+    }
+
 private:
     void update_with_state_replacement_table(const std::unordered_map<State, State>& state_replacement_table, 
         State new_start_state, const minimize_policy& policy) {
@@ -466,7 +487,7 @@ private:
 
         for (auto&& pair : m_state_pair_map) {
             const state_from_to_t& from_to_state = pair.first;
-            const ordered_uniqe_vec<Edge>& edges = pair.second;
+            const ordered_unique_vec<Edge>& edges = pair.second;
 
             State new_state_1 = from_to_state.s1;
             State new_state_2 = from_to_state.s2;
@@ -584,22 +605,16 @@ private:
                 return guard.return_value(false);
             }
 
-            for (auto iter1 = s1_map.begin(), iter2 = s2_map.begin(); iter1 != s1_map.end(); ++iter1, ++iter2) {
-                if (iter2 != s2_map.end()) {
-                    const Edge edge1 = iter1->first;
-                    const Edge edge2 = iter2->first;
-                    if (edge1 != edge2) {
-                        return guard.return_value(false); // 出边集不同，一定不能合并
-                    }
-
-                    State next_s1 = iter1->second;
-                    State next_s2 = iter2->second;
-                    if (!can_be_merged(next_s1, next_s2, cache_result)) {
-                        return guard.return_value(false);
-                    }
-                }
-                else {
+            for (auto&& pair1 : s1_map) { // 不能采用两个 map iter 同步迭代的方案，因为 unordered_map 的 key 集即使相同，但排列的顺序可能不同！！！
+                const Edge e = pair1.first;
+                auto found = s2_map.find(e);
+                if (s2_map.end() == found) {
                     return guard.return_value(false); // 出边集不同，一定不能合并
+                }
+                State next_s1 = pair1.second;
+                State next_s2 = found->second;
+                if (!can_be_merged(next_s1, next_s2, cache_result)) {
+                    return guard.return_value(false);
                 }
             }
         }
@@ -613,9 +628,9 @@ private:
         return guard.return_value(true); // 可以合并
     } // function can_be_merged()
 
-    static inline unsigned long long combination_n_choose_2(std::size_t N) {
-        if (N < 2u) { return 0; } // C(N, 2) is 0 for N < 2
-        return static_cast<unsigned long long>(N) * (N - 1u) / 2u;
+    static constexpr inline unsigned long long combination_n_choose_2(std::size_t N) {
+        return (N < 2u) ? 0u // C(N, 2) is 0 for N < 2
+            : (static_cast<unsigned long long>(N) * (N - 1u) / 2u);
     }
 
     template <class H>
@@ -630,6 +645,85 @@ private:
         }
     }
 
+    static bool compare_move_functions(State s1, const move_functions_t& move_funcs1,
+        State s2, const move_functions_t& move_funcs2, std::unordered_map<State, State>& state_map) {
+
+        if (!state_map.insert({ s1, s2 }).second) { return true; } // 破环
+
+        auto&& found1 = move_funcs1.find(s1);
+        auto&& found2 = move_funcs2.find(s2);
+
+        const bool not_found1 = move_funcs1.end() == found1;
+        const bool not_found2 = move_funcs2.end() == found2;
+        if (not_found1 && not_found2) {
+            return true;
+        }
+        if (not_found1 != not_found2) {
+            return false;
+        }
+
+        auto&& mapped1 = found1->second;
+        auto&& mapped2 = found2->second;
+        if (mapped1.size() != mapped2.size()) {
+            return false;
+        }
+
+        for (auto&& pair : mapped1) { // 不能采用两个 map iter 同步迭代的方案，因为 unordered_map 的 key 集即使相同，但排列的顺序可能不同！！！
+            const Edge e = pair.first;
+            auto found = mapped2.find(e);
+            if (mapped2.end() == found) {
+                return false;
+            }
+            State next1 = pair.second;
+            State next2 = found->second;
+            if (!compare_move_functions(next1, move_funcs1, next2, move_funcs2, state_map)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    static bool compare_final_states(const ordered_unique_vec<State>& final_state1,
+        const ordered_unique_vec<State>& final_state2, std::unordered_map<State, State>& state_map) noexcept {
+
+        if (final_state1.size() != final_state2.size()) {
+            return false;
+        }
+
+        for (auto iter1 = final_state1.begin(), iter2 = final_state2.begin();
+            iter1 != final_state1.end(); ++iter1, ++iter2) {
+            if (iter2 == final_state2.end()) {
+                return false;
+            }
+
+            const State s1 = *iter1;
+            const State s2 = *iter2;
+
+            auto found = state_map.find(s1);
+            if (state_map.end() == found) {
+                assert(false && "BUG in DFA::compare_final_states()");
+                return false;
+            }
+
+            if (found->second != s2) { return false; }
+        }
+
+        return true;
+    }
+
+    void gen_move_functions_from_state_pair_map() {
+        if (!m_move_functions.empty()) { return; }
+        for (auto&& p : m_state_pair_map) {
+            const state_from_to_t& ft = p.first;
+            const ordered_unique_vec<Edge>& edges = p.second;
+            auto&& mapped = m_move_functions[ft.s1];
+            for (Edge e : edges) {
+                mapped[e] = ft.s2;
+            }
+        }
+    }
+
 private:
     state_pair_map_t          m_state_pair_map;  // for to_mermaid()
     move_functions_t          m_move_functions;  // for try_minimize()
@@ -640,7 +734,7 @@ private:
 namespace details {
 
     struct merged_states_hash {
-        std::size_t operator()(const ordered_uniqe_vec<State>& state_vec) const {
+        std::size_t operator()(const ordered_unique_vec<State>& state_vec) const {
             std::size_t hash_code = 0;
             for (State s : state_vec) {
                 hash_code += state_hash()(s);
@@ -651,12 +745,12 @@ namespace details {
 
     // 缓存
     typedef std::unordered_map<
-        ordered_uniqe_vec<State>, ordered_uniqe_vec<State>, merged_states_hash
+        ordered_unique_vec<State>, ordered_unique_vec<State>, merged_states_hash
     > cache_eat_epsilon_star_t;
 
     struct cache_batch_eat_edge_t {
         struct key_t {
-            ordered_uniqe_vec<State> from;
+            ordered_unique_vec<State> from;
             Edge                     edge;
         };
 
@@ -672,7 +766,7 @@ namespace details {
             }
         };
 
-        typedef std::unordered_map<key_t, ordered_uniqe_vec<State>, hash, equal> cache_t;
+        typedef std::unordered_map<key_t, ordered_unique_vec<State>, hash, equal> cache_t;
 
         template <class K>
         cache_t::const_iterator find(K&& k) const {
@@ -697,11 +791,11 @@ namespace details {
             m_start_state = state;
         }
 
-        bool move_func(State state, Edge edge, const ordered_uniqe_vec<State>& next_state_vec) {
-            return move_func(ordered_uniqe_vec<State>{ state }, edge, next_state_vec);
+        bool move_func(State state, Edge edge, const ordered_unique_vec<State>& next_state_vec) {
+            return move_func(ordered_unique_vec<State>{ state }, edge, next_state_vec);
         }
 
-        bool move_func(const ordered_uniqe_vec<State>& state, Edge edge, const ordered_uniqe_vec<State>& next_state_vec) {
+        bool move_func(const ordered_unique_vec<State>& state, Edge edge, const ordered_unique_vec<State>& next_state_vec) {
             if (state.empty() || next_state_vec.empty()) {
                 return false;
             }
@@ -709,7 +803,7 @@ namespace details {
             return true;
         }
 
-        bool move_func(const ordered_uniqe_vec<State>& state, edge_to_states_t&& merged_edge_map) {
+        bool move_func(const ordered_unique_vec<State>& state, edge_to_states_t&& merged_edge_map) {
             if (state.empty() || merged_edge_map.empty()) {
                 return false;
             }
@@ -727,7 +821,7 @@ namespace details {
             return true;
         }
 
-        bool find_from_state(const ordered_uniqe_vec<State>& state) const {
+        bool find_from_state(const ordered_unique_vec<State>& state) const {
             return m_move_functions.end() != m_move_functions.find(state);
         }
 
@@ -750,14 +844,14 @@ namespace details {
         }
 
     public:
-        typedef std::unordered_map<ordered_uniqe_vec<State>, edge_to_states_t, merged_states_hash> move_functions_t;
-        typedef std::unordered_set<ordered_uniqe_vec<State>, merged_states_hash> merged_states_temp_t;
+        typedef std::unordered_map<ordered_unique_vec<State>, edge_to_states_t, merged_states_hash> move_functions_t;
+        typedef std::unordered_set<ordered_unique_vec<State>, merged_states_hash> merged_states_temp_t;
 
     public:
         State                     m_start_state = invalid_state;
         move_functions_t          m_move_functions;
         state_pair_map_t          m_state_pair_map;
-        ordered_uniqe_vec<State>  m_final_states;
+        ordered_unique_vec<State> m_final_states;
         std::unordered_set<State> m_dfa_state_set;
         dfa_move_functions_t      m_dfa_move_functions;
         merged_states_temp_t      m_merged_states_temp;
@@ -776,7 +870,7 @@ namespace details {
             calculated_value = 1
         };
 
-        typedef std::pair<const ordered_uniqe_vec<State>*, Edge> key_t;
+        typedef std::pair<const ordered_unique_vec<State>*, Edge> key_t;
 
     public:
         bool transfer_init_state() {
@@ -792,12 +886,12 @@ namespace details {
             return cache_state::calculated_value == m_cache_state;
         }
 
-        const ordered_uniqe_vec<State>& calculated_value() const {
+        const ordered_unique_vec<State>& calculated_value() const {
             has_been_calculated();
             return m_calculated_value;
         }
 
-        ordered_uniqe_vec<State>& return_value(ordered_uniqe_vec<State>& ret) {
+        ordered_unique_vec<State>& return_value(ordered_unique_vec<State>& ret) {
             assert(still_on_outer_layer_stack());
             m_cache_state = cache_state::calculated_value;
             assert(m_calculated_value.empty());
@@ -808,7 +902,7 @@ namespace details {
         }
 
         dfa_aux_cache_guard_t(const key_t& cached_key,
-            ordered_uniqe_vec<State>& calculated_value,
+            ordered_unique_vec<State>& calculated_value,
             dfa_aux_t& dfa_aux, cache_state cstate)
             : m_cached_key(cached_key)
             , m_calculated_value(calculated_value)
@@ -820,8 +914,8 @@ namespace details {
         void generate_dfa_move_function() {
             assert(has_been_calculated());
             assert(nullptr != m_cached_key.first);
-            const ordered_uniqe_vec<State>& from = *(m_cached_key.first);
-            const ordered_uniqe_vec<State>& to   = m_calculated_value;
+            const ordered_unique_vec<State>& from = *(m_cached_key.first);
+            const ordered_unique_vec<State>& to   = m_calculated_value;
             Edge edge = m_cached_key.second;
             m_dfa_aux.generate_dfa_move_function(from, edge, to);
         }
@@ -832,7 +926,7 @@ namespace details {
 
     private:
         const key_t               m_cached_key;
-        ordered_uniqe_vec<State>& m_calculated_value;
+        ordered_unique_vec<State>& m_calculated_value;
         dfa_aux_t&                m_dfa_aux;
         cache_state               m_cache_state = cache_state::initial_value;
     }; // class dfa_aux_cache_guard_t
@@ -855,7 +949,7 @@ namespace details {
             }
         };
 
-        const ordered_uniqe_vec<State>* find(State nfa_state, Edge edge) const {
+        const ordered_unique_vec<State>* find(State nfa_state, Edge edge) const {
             auto found = m_cache.find(key_t{ nfa_state, edge });
             if (m_cache.end() != found) {
                 return &(found->second);
@@ -863,7 +957,7 @@ namespace details {
             return nullptr;
         }
 
-        ordered_uniqe_vec<State>& update(State nfa_state, Edge edge, ordered_uniqe_vec<State>& cached_value) {
+        ordered_unique_vec<State>& update(State nfa_state, Edge edge, ordered_unique_vec<State>& cached_value) {
             assert(epsilon != edge);
             assert(nullptr == find(nfa_state, edge));
             m_cache[key_t{ nfa_state, edge }] = cached_value; // insert
@@ -871,13 +965,13 @@ namespace details {
         }
 
         // { key : e-nfa state + edge;  mapped_value: 吃掉 epsilon* edge opsilon* 之后的状态 }
-        std::unordered_map<key_t, ordered_uniqe_vec<State>, hash, equal> m_cache;
+        std::unordered_map<key_t, ordered_unique_vec<State>, hash, equal> m_cache;
     }; // struct remove_epsilon_cache_t
 
     class DFAAux2 {
     public:
         typedef dfa_aux_cache_guard_t<DFAAux2> _dfa_aux_cache_guard_t;
-        typedef std::unordered_map<ordered_uniqe_vec<State>, edge_to_states_t, merged_states_hash> cache_move_functions_t;
+        typedef std::unordered_map<ordered_unique_vec<State>, edge_to_states_t, merged_states_hash> cache_move_functions_t;
 
     public:
         void set_start_state(State state) {
@@ -893,13 +987,13 @@ namespace details {
             m_current_max_state = state;
         }
 
-        _dfa_aux_cache_guard_t generate_cache_guard(const ordered_uniqe_vec<State>& from_state, Edge edge) {
+        _dfa_aux_cache_guard_t generate_cache_guard(const ordered_unique_vec<State>& from_state, Edge edge) {
             assert(!from_state.empty());
             assert(epsilon != edge);
 
             _dfa_aux_cache_guard_t::cache_state cstate = _dfa_aux_cache_guard_t::cache_state::initial_value;
             _dfa_aux_cache_guard_t::key_t cached_key;
-            ordered_uniqe_vec<State>* cached_value = nullptr;
+            ordered_unique_vec<State>* cached_value = nullptr;
             auto found = m_cache_move_functions.find(from_state);
             if (m_cache_move_functions.end() == found) { // 没有 from_state 也没有 edge
                 auto res = m_cache_move_functions.insert({ from_state, edge_to_states_t{} });
@@ -907,7 +1001,7 @@ namespace details {
                 cached_key = std::make_pair(&(res.first->first), edge);
 
                 edge_to_states_t& edge_to_states = res.first->second;
-                ordered_uniqe_vec<State>& result = edge_to_states[edge]; // insert
+                ordered_unique_vec<State>& result = edge_to_states[edge]; // insert
                 cached_value = &result;
             }
             else {
@@ -927,7 +1021,7 @@ namespace details {
             return _dfa_aux_cache_guard_t(cached_key, *cached_value, *this, cstate);
         }
 
-        void generate_dfa_move_function(const ordered_uniqe_vec<State>& from, Edge edge, const ordered_uniqe_vec<State>& to) {
+        void generate_dfa_move_function(const ordered_unique_vec<State>& from, Edge edge, const ordered_unique_vec<State>& to) {
             if (from.empty() || to.empty()) {
                 return;
             }
@@ -939,13 +1033,13 @@ namespace details {
             m_dfa_move_functions[dfa_from][edge] = dfa_to; // for minimize dfa
 
             state_from_to_t from_to { dfa_from , dfa_to };
-            ordered_uniqe_vec<Edge>& edges = m_state_pair_map[from_to];
+            ordered_unique_vec<Edge>& edges = m_state_pair_map[from_to];
             if (! edges.binary_search(edge)) {
                 edges.ordered_push(edge);
             }
         }
 
-        State calc_dfa_state(const ordered_uniqe_vec<State>& state) {
+        State calc_dfa_state(const ordered_unique_vec<State>& state) {
             assert(!state.empty());
             bool was_just_inserted = false;
             const State dfa_state = m_dfa_state_map.calc_dfa_state(state, m_current_max_state, was_just_inserted);
@@ -974,7 +1068,7 @@ namespace details {
                 return false;
             }
 
-            ordered_uniqe_vec<State> final_states(m_dfa_final_states.begin(), m_dfa_final_states.end());
+            ordered_unique_vec<State> final_states(m_dfa_final_states.begin(), m_dfa_final_states.end());
             dfa.reset(m_start_state, std::move(m_state_pair_map),
                 std::move(make_ordered_unique_mut_vec(final_states)),
                 std::move(dfa_state_set), std::move(m_dfa_move_functions));
@@ -989,7 +1083,7 @@ namespace details {
         dfa_move_functions_t      m_dfa_move_functions;
         state_pair_map_t          m_state_pair_map;
 
-        // typedef std::unordered_map<const ordered_uniqe_vec<State>, State, merged_states_hash> dfa_state_map_t;
+        // typedef std::unordered_map<const ordered_unique_vec<State>, State, merged_states_hash> dfa_state_map_t;
         class dfa_state_map_t { // 一表两用：1. dfa_aux_move_each_edge() 递归破环；2. calc_dfa_state() 计算 dfa 状态值
         public:
             struct mapped_value_t {
@@ -999,9 +1093,9 @@ namespace details {
                 mapped_value_t() : dfa_state(invalid_state), has_been_reached(false) {}
             };
 
-            typedef std::unordered_map<const ordered_uniqe_vec<State>, mapped_value_t, merged_states_hash> map_t;
+            typedef std::unordered_map<const ordered_unique_vec<State>, mapped_value_t, merged_states_hash> map_t;
 
-            bool break_loop(const ordered_uniqe_vec<State>& dfa_aux_from_state) {
+            bool break_loop(const ordered_unique_vec<State>& dfa_aux_from_state) {
                 assert(!dfa_aux_from_state.empty());
                 auto found = m_map.find(dfa_aux_from_state);
                 if (m_map.end() != found) {
@@ -1018,7 +1112,7 @@ namespace details {
                 return false; // 第一次来
             }
 
-            State calc_dfa_state(const ordered_uniqe_vec<State>& dfa_aux_state, State& current_max_state, bool& was_just_inserted) {
+            State calc_dfa_state(const ordered_unique_vec<State>& dfa_aux_state, State& current_max_state, bool& was_just_inserted) {
                 assert(!dfa_aux_state.empty());
                 auto found = m_map.find(dfa_aux_state);
                 if (m_map.end() != found) {
@@ -1054,7 +1148,7 @@ namespace details {
             }
 
         private:
-            State gen_new_dfa_state(const ordered_uniqe_vec<State>& dfa_aux_state, State& current_max_state) const {
+            State gen_new_dfa_state(const ordered_unique_vec<State>& dfa_aux_state, State& current_max_state) const {
                 assert(!dfa_aux_state.empty());
                 return (dfa_aux_state.size() == 1u)
                     ? dfa_aux_state.back() : (current_max_state = successor(current_max_state));
@@ -1074,7 +1168,7 @@ namespace details {
         cache_move_functions_t   m_cache_move_functions;
     }; // class DFAAux2
 
-    _DEPRECATED_ALGO static inline void debug_print(const ordered_uniqe_vec<State>& states) {
+    _DEPRECATED_ALGO static inline void debug_print(const ordered_unique_vec<State>& states) {
         (void)states;
 #ifndef NDEBUG
         if (!states.empty()) {
@@ -1093,13 +1187,13 @@ namespace details {
 #ifndef NDEBUG
         std::cout << std::endl << "```" << std::endl << "DFAAux::move_functions:" << std::endl;
         for (auto&& pair : dfa_aux_move_functions) {
-            const ordered_uniqe_vec<State>& key = pair.first;
+            const ordered_unique_vec<State>& key = pair.first;
             const edge_to_states_t& mapped = pair.second;
 
             std::cout << "["; debug_print(key); std::cout << "] :" << std::endl;
             for (auto&& etss : mapped) {
                 Edge e = etss.first;
-                const ordered_uniqe_vec<State>& tos = etss.second;
+                const ordered_unique_vec<State>& tos = etss.second;
                 std::cout << "    [" << e << "] : {"; debug_print(tos); std::cout << "}" << std::endl;
             }
         }
@@ -1123,7 +1217,7 @@ public:
         //}
 
         edge_to_states_t& edge_to_states = m_move_func[s1];
-        ordered_uniqe_vec<State>& to_states = edge_to_states[edge];
+        ordered_unique_vec<State>& to_states = edge_to_states[edge];
 
         for (State s : s2) {
             if (s == s1 && epsilon == edge) {
@@ -1169,14 +1263,14 @@ public:
     std::string to_mermaid(const char* endline = "\n") const {
         std::string ret;
 
-        std::unordered_map<state_from_to_t, std::vector<Edge>, state_from_to_t::hash, state_from_to_t::equal> state_pair_map_aux;
+        std::unordered_map<state_from_to_t, std::vector<Edge>, state_from_to_t::hash> state_pair_map_aux;
         for (auto&& m : m_move_func) {
             const State& s1 = m.first;
             const edge_to_states_t& edge_to_states = m.second;
 
             for (auto&& e2ss : edge_to_states) {
                 Edge edge = e2ss.first;
-                const ordered_uniqe_vec<State>& states2 = e2ss.second;
+                const ordered_unique_vec<State>& states2 = e2ss.second;
                 for (State s2 : states2) {
                     std::vector<Edge>& edges = state_pair_map_aux[state_from_to_t{ s1, s2 }];
                     edges.push_back(edge);
@@ -1225,7 +1319,7 @@ private:
         return dfa_aux_move_each_edge({ dfa_aux.m_start_state }, dfa_aux, err); // 这样递归下去的一定都是可达状态
     } // make_dfa_transition_table
 
-    bool dfa_aux_move_each_edge(const ordered_uniqe_vec<State>& dfa_aux_from_state, DFAAux2& dfa_aux, std::string& err) const {
+    bool dfa_aux_move_each_edge(const ordered_unique_vec<State>& dfa_aux_from_state, DFAAux2& dfa_aux, std::string& err) const {
         if (dfa_aux_from_state.empty()) {
             return true; // 忽略此状态
         }
@@ -1246,7 +1340,7 @@ private:
                     for (auto&& pair : edge_to_states) {
                         const Edge edge = pair.first;
                         assert(epsilon != edge);
-                        ordered_uniqe_vec<State> dfa_aux_next_state = dfa_aux_move_to_next(dfa_aux_from_state, edge, dfa_aux, err);
+                        ordered_unique_vec<State> dfa_aux_next_state = dfa_aux_move_to_next(dfa_aux_from_state, edge, dfa_aux, err);
                         assert(pair.second.size() <= dfa_aux_next_state.size());
                         if (!dfa_aux_move_each_edge(dfa_aux_next_state, dfa_aux, err)) {
                             return false;
@@ -1270,7 +1364,7 @@ private:
 
         for (; input_edges_iter != m_input_edges.end(); ++input_edges_iter) {
             const Edge edge = *input_edges_iter;
-            ordered_uniqe_vec<State> dfa_aux_next_state = dfa_aux_move_to_next(dfa_aux_from_state, edge, dfa_aux, err);
+            ordered_unique_vec<State> dfa_aux_next_state = dfa_aux_move_to_next(dfa_aux_from_state, edge, dfa_aux, err);
             if (!dfa_aux_move_each_edge(dfa_aux_next_state, dfa_aux, err)) {
                 return false;
             }
@@ -1279,33 +1373,33 @@ private:
         return true;
     } // dfa_aux_move_each_edge
 
-    ordered_uniqe_vec<State> dfa_aux_move_to_next(State state, Edge edge, DFAAux2& dfa_aux) const {
+    ordered_unique_vec<State> dfa_aux_move_to_next(State state, Edge edge, DFAAux2& dfa_aux) const {
         // nfa 单值状态的转移，不一定是可达状态
         assert(epsilon != edge);
         assert(invalid_state != state);
         assert(m_input_states.binary_search(state));
 
-        const ordered_uniqe_vec<State>* found = dfa_aux.m_remove_epsilon_cache.find(state, edge);
+        const ordered_unique_vec<State>* found = dfa_aux.m_remove_epsilon_cache.find(state, edge);
         if (nullptr != found) {
             return *found;
         }
 
         // remove epsilon : eat epsilon* edge epsilon*
-        ordered_uniqe_vec<State> to_states0;
+        ordered_unique_vec<State> to_states0;
         eat_epsilon_star({ state }, to_states0, dfa_aux.m_cache_eat_epsilon_star);
         assert(!to_states0.empty()); // 至少应该包含 current_state
 
-        ordered_uniqe_vec<State> to_states1 = batch_eat_edge(to_states0, edge, &dfa_aux.m_cache_batch_eat_edge);
+        ordered_unique_vec<State> to_states1 = batch_eat_edge(to_states0, edge, &dfa_aux.m_cache_batch_eat_edge);
         if (to_states1.empty()) { // 此路不通，放弃此路径
             return dfa_aux.m_remove_epsilon_cache.update(state, edge, to_states1);
         }
-        ordered_uniqe_vec<State> to_states2;
+        ordered_unique_vec<State> to_states2;
         eat_epsilon_star(std::move(to_states1), to_states2, dfa_aux.m_cache_eat_epsilon_star);
         assert(!to_states2.empty());
         return dfa_aux.m_remove_epsilon_cache.update(state, edge, to_states2);
     }
 
-    ordered_uniqe_vec<State> dfa_aux_move_to_next(const ordered_uniqe_vec<State>& state,
+    ordered_unique_vec<State> dfa_aux_move_to_next(const ordered_unique_vec<State>& state,
         Edge edge, DFAAux2& dfa_aux, std::string& err) const {
         // 此函数的输入 state 和 返回值 如果不为空，则它们一定是 dfa 的可达状态
         assert(epsilon != edge);
@@ -1324,13 +1418,13 @@ private:
         }
 
         if (1u == state.size()) { // nfa 单值状态的转移
-            ordered_uniqe_vec<State> ret = dfa_aux_move_to_next(state.back(), edge, dfa_aux);
+            ordered_unique_vec<State> ret = dfa_aux_move_to_next(state.back(), edge, dfa_aux);
             return dfa_aux_cache_guard.return_value(ret);
         }
 
-        ordered_uniqe_vec<State> ret;
+        ordered_unique_vec<State> ret;
         for (State substate : state) {
-            ordered_uniqe_vec<State> res = dfa_aux_move_to_next(substate, edge, dfa_aux); // 统计每个单值状态转移
+            ordered_unique_vec<State> res = dfa_aux_move_to_next(substate, edge, dfa_aux); // 统计每个单值状态转移
             ret.insert(ret.end(), res.begin(), res.end());
         }
         return dfa_aux_cache_guard.return_value(make_ordered_unique_mut_vec(ret));
@@ -1358,21 +1452,21 @@ private:
         return dfa_aux_convert_to_state_pair(dfa_aux);
     }// to_dfa_aux
 
-    void eat_epsilon_star_impl(const ordered_uniqe_vec<State>& states,
-        ordered_uniqe_vec<State>& ret, std::unordered_set<State>& state_hit_map) const {
+    void eat_epsilon_star_impl(const ordered_unique_vec<State>& states,
+        ordered_unique_vec<State>& ret, std::unordered_set<State>& state_hit_map) const {
 
         for (State fs : states) {
             if (state_hit_map.insert(fs).second) {
-                const ordered_uniqe_vec<State>* tos = eat_edge(fs, epsilon);
+                const ordered_unique_vec<State>* tos = eat_edge(fs, epsilon);
                 if (nullptr != tos && !tos->empty()) {
-                    ret.insert(ret.end(), tos->begin(), tos->end()); // 后续集中 make ordered uniqe
+                    ret.insert(ret.end(), tos->begin(), tos->end()); // 后续集中 make ordered unique
                     eat_epsilon_star_impl(*tos, ret, state_hit_map);
                 }
             }
         }
     }
 
-    void eat_epsilon_star(ordered_uniqe_vec<State>&& states, ordered_uniqe_vec<State>& ret, details::cache_eat_epsilon_star_t& cache) const {
+    void eat_epsilon_star(ordered_unique_vec<State>&& states, ordered_unique_vec<State>& ret, details::cache_eat_epsilon_star_t& cache) const {
         assert((!states.empty()) && ret.empty());
         if (!has_epsilon()) {
             assert(&ret != &states); // make sure it works with gcc
@@ -1396,7 +1490,7 @@ private:
         return;
     }
 
-    const ordered_uniqe_vec<State>* eat_edge(State from, Edge edge) const {
+    const ordered_unique_vec<State>* eat_edge(State from, Edge edge) const {
         assert(invalid_state != from);
         assert(m_input_states.binary_search(from)); // 若断言失败说明 from 状态非法
 
@@ -1405,14 +1499,14 @@ private:
             const edge_to_states_t& edge_to_states = found_s1->second;
             auto found_s2 = edge_to_states.find(edge);
             if (edge_to_states.end() != found_s2) {
-                const ordered_uniqe_vec<State>& all_s2 = found_s2->second;
+                const ordered_unique_vec<State>& all_s2 = found_s2->second;
                 return &all_s2;
             }
         }
         return nullptr; // 返回 nullptr 意味着不存在此出边；或者 from 状态非法
     }
 
-    ordered_uniqe_vec<State> batch_eat_edge(const ordered_uniqe_vec<State>& froms, Edge edge, details::cache_batch_eat_edge_t* cache = nullptr) const {
+    ordered_unique_vec<State> batch_eat_edge(const ordered_unique_vec<State>& froms, Edge edge, details::cache_batch_eat_edge_t* cache = nullptr) const {
         assert((!froms.empty()));
 
         const bool enable_cache = (nullptr != cache) && (froms.size() > 1u);
@@ -1424,9 +1518,9 @@ private:
             }
         }
 
-        ordered_uniqe_vec<State> res;
+        ordered_unique_vec<State> res;
         for (State s1 : froms) {
-            const ordered_uniqe_vec<State>* tos = eat_edge(s1, edge);
+            const ordered_unique_vec<State>* tos = eat_edge(s1, edge);
             if (nullptr != tos && !tos->empty()) {
                 res.insert(res.end(), tos->begin(), tos->end()); // 后续集中 make_ordered_unique
             }
@@ -1449,7 +1543,7 @@ private:
             return true;
         }
 
-        ordered_uniqe_vec<State> to_states;
+        ordered_unique_vec<State> to_states;
         eat_epsilon_star({ state }, to_states, dfa_aux.m_cache_eat_epsilon_star);
         assert(!to_states.empty()); // 至少应该包含原始输入状态
         for (State s : to_states) {
@@ -1469,7 +1563,7 @@ private:
             return true;
         }
 
-        ordered_uniqe_vec<State> to_states;
+        ordered_unique_vec<State> to_states;
         eat_epsilon_star({ state }, to_states, dfa_aux.m_cache_eat_epsilon_star);
         assert(!to_states.empty()); // 至少应该包含原始输入状态
         for (State s : to_states) {
@@ -1496,16 +1590,16 @@ private:
         for (; input_edges_iter != m_input_edges.end(); ++input_edges_iter) {
             Edge edge = *input_edges_iter;
             // remove epsilon : eat epsilon* edge epsilon*
-            ordered_uniqe_vec<State> to_states0;
+            ordered_unique_vec<State> to_states0;
             eat_epsilon_star({ current_state }, to_states0, dfa_aux.m_cache_eat_epsilon_star);
             assert(!to_states0.empty()); // 至少应该包含 current_state
 
-            ordered_uniqe_vec<State> to_states1 = batch_eat_edge(to_states0, edge, &dfa_aux.m_cache_batch_eat_edge);
+            ordered_unique_vec<State> to_states1 = batch_eat_edge(to_states0, edge, &dfa_aux.m_cache_batch_eat_edge);
             if (to_states1.empty()) { // 此路不通，放弃此路径
                 // 放弃此路径
                 continue;
             }
-            ordered_uniqe_vec<State> to_states2;
+            ordered_unique_vec<State> to_states2;
             eat_epsilon_star(std::move(to_states1), to_states2, dfa_aux.m_cache_eat_epsilon_star);
             assert(!to_states2.empty());
 
@@ -1535,8 +1629,8 @@ private:
         }
 
         {
-            std::unordered_set<ordered_uniqe_vec<State>, details::merged_states_hash> new_merged_states_temp;
-            for (const ordered_uniqe_vec<State>& merged_state : dfa_aux.m_merged_states_temp) {
+            std::unordered_set<ordered_unique_vec<State>, details::merged_states_hash> new_merged_states_temp;
+            for (const ordered_unique_vec<State>& merged_state : dfa_aux.m_merged_states_temp) {
                 assert(merged_state.size() > 1u);
 
                 if (dfa_aux.find_from_state(merged_state)) {
@@ -1562,7 +1656,7 @@ private:
                     // merged_edge_map += edge_map
                     for (auto&& pair : edge_map) {
                         if (!pair.second.empty()) {
-                            ordered_uniqe_vec<State>& states = merged_edge_map[pair.first];
+                            ordered_unique_vec<State>& states = merged_edge_map[pair.first];
                             states.ordered_insert(pair.second);
                         }
                     }
@@ -1591,13 +1685,13 @@ private:
     _DEPRECATED_ALGO bool dfa_aux_convert_to_state_pair(DFAAux& dfa_aux) const {
         // 职责：将 dfa_aux.m_move_functions 转换为 dfa_aux.m_state_pair_map 和 dfa_aux.m_dfa_move_functions，
         //       并标记 final state、 收集 dfa 状态和再次去除死状态
-        std::unordered_map<ordered_uniqe_vec<State>, State, details::merged_states_hash> new_state_map;
+        std::unordered_map<ordered_unique_vec<State>, State, details::merged_states_hash> new_state_map;
         dfa_aux.m_dfa_state_set.clear(); // 在 dfa_aux_convert_to_state_pair_impl() 中它仅用来做破环，并不包含 next 状态集
         return dfa_aux_convert_to_state_pair_impl(dfa_aux, { dfa_aux.m_start_state }, new_state_map);
     }
 
-    _DEPRECATED_ALGO bool dfa_aux_convert_to_state_pair_impl(DFAAux& dfa_aux, const ordered_uniqe_vec<State>& dfa_aux_state1,
-        std::unordered_map<ordered_uniqe_vec<State>, State, details::merged_states_hash>& new_state_map) const {
+    _DEPRECATED_ALGO bool dfa_aux_convert_to_state_pair_impl(DFAAux& dfa_aux, const ordered_unique_vec<State>& dfa_aux_state1,
+        std::unordered_map<ordered_unique_vec<State>, State, details::merged_states_hash>& new_state_map) const {
 
         auto found_state = dfa_aux.m_move_functions.find(dfa_aux_state1);
         if (dfa_aux.m_move_functions.end() == found_state) {
@@ -1620,10 +1714,10 @@ private:
         std::unordered_map<Edge, State>& dfa_edge_to_state_map = dfa_aux.m_dfa_move_functions[dfa_s1];
         for (auto&& e2ss : edge_to_states) {
             Edge edge = e2ss.first;
-            const ordered_uniqe_vec<State>& dfa_aux_states2 = e2ss.second;
+            const ordered_unique_vec<State>& dfa_aux_states2 = e2ss.second;
 
             const State dfa_s2 = dfa_aux_calc_dfa_state(dfa_aux_states2, dfa_aux, new_state_map);
-            ordered_uniqe_vec<Edge>& edges = dfa_aux.m_state_pair_map[state_from_to_t{ dfa_s1, dfa_s2 }];
+            ordered_unique_vec<Edge>& edges = dfa_aux.m_state_pair_map[state_from_to_t{ dfa_s1, dfa_s2 }];
             edges.ordered_push(edge);
 
             dfa_edge_to_state_map[edge] = dfa_s2; // for dfa.try_minimize()
@@ -1636,8 +1730,8 @@ private:
         return true;
     }
 
-    _DEPRECATED_ALGO State dfa_aux_calc_dfa_state(const ordered_uniqe_vec<State>& dfa_aux_state, DFAAux& dfa_aux,
-        std::unordered_map<ordered_uniqe_vec<State>, State, details::merged_states_hash>& new_state_map) const {
+    _DEPRECATED_ALGO State dfa_aux_calc_dfa_state(const ordered_unique_vec<State>& dfa_aux_state, DFAAux& dfa_aux,
+        std::unordered_map<ordered_unique_vec<State>, State, details::merged_states_hash>& new_state_map) const {
         // 职责：由 dfa_aux 的状态 得到 dfa 的状态，并对终止状态进行染色
         State dfa_state = invalid_state;
         if (dfa_aux_state.size() == 1u) {
@@ -1675,9 +1769,9 @@ private:
 
 private:
     std::unordered_map<State, edge_to_states_t>  m_move_func;
-    ordered_uniqe_vec<Edge>                      m_input_edges;  // to speed up `to_dfa()`
-    ordered_uniqe_vec<State>                     m_input_states;
-    //bool                                         m_is_already_dfa = true;
+    ordered_unique_vec<Edge>                     m_input_edges;  // to speed up `to_dfa()`
+    ordered_unique_vec<State>                    m_input_states;
+    //bool                                        m_is_already_dfa = true;
 }; // class EpsilonNFA
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1922,6 +2016,7 @@ graph TD;
 
     dfa.try_minimize();
     mermaid_result = dfa.to_mermaid("\n");
+    std::cout << "minimized DFA: " << std::endl << mermaid_result << std::endl;
 
     expected_result = R"==(```mermaid
 graph TD;
@@ -1969,6 +2064,8 @@ graph TD;
         std::cout << "minimized DFA: " << std::endl << s3 << std::endl;
 
         // expected : mermaid_result == s3
+
+        TEST_ASSERT(dfa2.is_same_shape_mut(dfa));
     }
 
     return 0;
