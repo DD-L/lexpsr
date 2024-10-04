@@ -9,6 +9,8 @@
  * the terms of the MIT license.
  */
 
+#pragma once
+
 #include <iostream> // for debug print
 #include <cstdint>
 #include <vector>
@@ -1313,6 +1315,14 @@ public:
         }
 
         return dfa_aux.to_dfa(dfa, err);
+    }
+
+    void reset() {
+        details::FABase::reset();
+        m_move_func.clear();
+        m_input_edges.clear();
+        m_input_states.clear();
+        // m_is_already_dfa = true;
     }
 
 private:
