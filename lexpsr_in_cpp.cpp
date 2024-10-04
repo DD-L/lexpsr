@@ -849,7 +849,7 @@ namespace regex {
                 return *this;
             }
 
-            CharSet& ToCastless() {
+            CharSet& ToCaseless() {
                 const bool v = IsPositive();
                 using fn = int(*)(int);
                 auto trans = [this, v](char low, char high, fn castfn) {
@@ -891,9 +891,10 @@ namespace regex {
                         if (IsPositive() ? (bit) : (!bit)) {
                             uint8_t target = (uint8_t)(i & 0xffu);
                             c = target;
-                            // 更新缓存？？？ 不值得在更新缓存！会使得维护复杂度上升
+                            // 更新缓存？？？ 不值得再更新缓存！会使得维护复杂度上升
                             // m_single_char        = target;
                             // m_single_char_cached = true;
+                            break;
                         }
                     }
                 }
@@ -1186,7 +1187,7 @@ void test_regex() {
             m_ast_charset_stack.clear();
             m_ast_node_stack.clear();
             m_global_modifiers = 0;
-            m_commentsCnt      = 0;
+            m_comments_cnt     = 0;
             ResetLiteralCharsetCnt();
 
             m_ast.Reset();
@@ -1219,7 +1220,7 @@ void test_regex() {
 
         RegexAST&                          m_ast;
         uint32_t                           m_global_modifiers = 0;
-        uint32_t                           m_commentsCnt      = 0;  // 注释的计数，用于修正 ac_seq 中的 loop_cnt
+        uint32_t                           m_comments_cnt     = 0;  // 注释的计数，用于修正 ac_seq 中的 loop_cnt
         uint32_t                           m_literal_charset_cnt        = 1;  // literal 字符（集）个数
         uint32_t                           m_literal_leading_word_bytes = 0;  // literal 引导词的长度，比如 \Q..\E 的引导词长度为 2
     }; // Context
@@ -1428,7 +1429,7 @@ void test_regex() {
         if (1u == ctx.m_literal_charset_cnt) { // literal 字符集个数为 1
             RegexAST::CharSet* cs = ctx.m_ast_charset_stack.back(); ctx.m_ast_charset_stack.pop_back();
             if (ctx.m_global_modifiers & (uint32_t)Flag::CASELESS) {
-                cs->ToCastless();
+                cs->ToCaseless();
             }
             RegexAST::Node* node = ctx.m_ast.CreateNode(RegexAST::NodeType::CharSet, tok, cs);
             ctx.m_ast_node_stack.push_back(node);
@@ -1441,7 +1442,7 @@ void test_regex() {
             for (std::size_t i = 0; i < ctx.m_literal_charset_cnt; ++i) {
                 RegexAST::CharSet* cs = ctx.m_ast_charset_stack[hold_cnt + i];
                 if (ctx.m_global_modifiers & (uint32_t)Flag::CASELESS) {
-                    cs->ToCastless();
+                    cs->ToCaseless();
                 }
                 core::StrRef _tok = { tok.data + ctx.m_literal_leading_word_bytes + i, 1u }; // 一个 CharSet 对应着 一个字符， 还要考虑移除引导词
                 assert(_tok.data < tok.data + tok.len); // 不能越界
@@ -1556,17 +1557,16 @@ void test_regex() {
     };
     auto ac_comment = [](const ActionArgs& args) {
         auto&& ctx = Ctx(args.m_contex);
-        ++ctx.m_commentsCnt; // 对注释计数，用于修正 ac_seq 的 loop_cnt
+        ++ctx.m_comments_cnt; // 对注释计数，用于修正 ac_seq 的 loop_cnt
         return true;
     };
     auto ac_seq = [](const ActionArgs& args) {
         const core::StrRef& tok = args.m_action_material.m_token;
         auto&& ctx = Ctx(args.m_contex);
-        assert(ctx.m_commentsCnt <= args.m_action_material.m_scanner_info);
-        const std::size_t loop_cnt = args.m_action_material.m_scanner_info - ctx.m_commentsCnt; // 要排除掉注释的影响
-        ctx.m_commentsCnt = 0; // 注释计数用完立刻清零
-        if (ctx.m_ast_node_stack.empty())
-        { // 没有有效节点
+        assert(ctx.m_comments_cnt <= args.m_action_material.m_scanner_info);
+        const std::size_t loop_cnt = args.m_action_material.m_scanner_info - ctx.m_comments_cnt; // 要排除掉注释的影响
+        ctx.m_comments_cnt = 0; // 注释计数用完立刻清零
+        if (ctx.m_ast_node_stack.empty()) { // 没有有效节点
             assert(0u == loop_cnt || 1u == loop_cnt);
             return true;
         }
