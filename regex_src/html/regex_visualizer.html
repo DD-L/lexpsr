@@ -1,0 +1,233 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>正则表达式图表可视化工具</title>
+    <!-- script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/9.4.3/mermaid.min.js"></script -->
+    <!-- script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/11.1.1/mermaid.min.js"></script -->
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 100%;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .input-area {
+            margin-bottom: 20px;
+        }
+        .input-area input {
+            margin-right: 10px;
+            padding: 5px;
+        }
+        .output-area {
+            margin-bottom: 20px;
+        }
+        #regex-input {
+            width: 100%;
+        }
+        #output-log {
+            width: 100%;
+            height: 100px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-bottom: 20px;
+        }
+        .graph-area {
+            display: flex;
+            justify-content: space-between;
+        }
+        .graph-section {
+            width: 32%;
+        }
+        .mermaid-data {
+            width: 100%;
+            height: 150px;
+            margin-bottom: 10px;
+        }
+        .render-button {
+            margin-bottom: 10px;
+        }
+        .mermaid-output {
+            border: 1px solid #ccc;
+            padding: 10px;
+            min-height: 200px;
+        }
+    </style>
+</head>
+<body>
+    <h1>正则表达式自动机可视化工具</h1>
+    
+    <div class="input-area">
+        <input type="text" id="regex-input" placeholder="输入正则表达式">
+        <br>
+        <input type="text" id="modifiers-input" placeholder="输入修饰符">
+        <button id="generate-button">生成结果</button>
+    </div>
+    
+    <div class="output-area">
+        <h2>输出日志</h2>
+        <div id="output-log"></div>
+    </div>
+    
+    <div class="graph-area">
+        <div class="graph-section">
+            <h2>e-NFA</h2>
+            <textarea class="mermaid-data" id="enfa-data"></textarea>
+            <button class="render-button" id="render-button" onclick="renderMermaid('enfa-data', 'enfa-output')">渲染 e-NFA</button>
+            <div class="mermaid-output" id="enfa-output"></div>
+        </div>
+        
+        <div class="graph-section">
+            <h2>DFA</h2>
+            <textarea class="mermaid-data" id="dfa-data"></textarea>
+            <button class="render-button" id="render-button" onclick="renderMermaid('dfa-data', 'dfa-output')">渲染 DFA</button>
+            <div class="mermaid-output" id="dfa-output"></div>
+        </div>
+        
+        <div class="graph-section">
+            <h2>极小化 DFA</h2>
+            <textarea class="mermaid-data" id="min-dfa-data"></textarea>
+            <button class="render-button" id="render-button" onclick="renderMermaid('min-dfa-data', 'min-dfa-output')">渲染极小化 DFA</button>
+            <div class="mermaid-output" id="min-dfa-output"></div>
+        </div>
+    </div>
+    
+    <script type="module">
+        // import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+        import mermaid from "./js/mermaid.esm.min.mjs";
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: "default",
+            flowchart: {
+                curve: 'basis',  // 设置为曲线, 使得指向自己的弧线更自然
+            }
+        });
+
+        function renderMermaid(dataId, outputId) {
+            const input = document.getElementById(dataId).value;
+            const output = document.getElementById(outputId);
+            try {
+                //output.innerHTML = input;  // 将输入内容直接放入输出容器
+                //mermaid.init(undefined, output);  // 初始化并渲染 Mermaid 图
+                
+                // 清空输出容器
+				output.innerHTML = '';
+
+				// 创建一个新的 div 来放置渲染的图形
+				const graphDiv = document.createElement('div');
+				graphDiv.innerHTML = input;
+
+				// 将新的 graphDiv 添加到输出容器
+				output.appendChild(graphDiv);
+
+				// 初始化并渲染新的 Mermaid 图
+				mermaid.init(undefined, graphDiv);
+            } catch (error) {
+                output.innerHTML = '<p style="color:red;">Invalid Mermaid syntax!</p>';
+            }
+        }
+
+        window.renderMermaid = renderMermaid;
+        // 等待 DOM 加载完后绑定事件
+        window.addEventListener('DOMContentLoaded', () => {
+            document.getElementById("render-button").addEventListener("click", renderMermaid);
+        });
+    </script>
+
+    <script>
+        //mermaid.initialize({ startOnLoad: false });
+        // 等待 DOM 完全加载后再初始化 Mermaid
+        //document.addEventListener('DOMContentLoaded', function() {
+        //    mermaid.initialize({ 
+        //        startOnLoad: false,
+        //        securityLevel: 'loose'
+        //    });
+        //});
+
+        document.getElementById('generate-button').addEventListener('click', generateResults);
+        //document.getElementById("render-button").addEventListener("click", renderMermaid);
+
+        function generateResults() {
+            const regex = document.getElementById('regex-input').value;
+            const modifiers = document.getElementById('modifiers-input').value;
+            
+            // 清空之前的结果
+            document.getElementById('output-log').innerHTML = '';
+            document.getElementById('enfa-data').value = '';
+            document.getElementById('dfa-data').value = '';
+            document.getElementById('min-dfa-data').value = '';
+            document.getElementById('enfa-output').innerHTML = '';
+            document.getElementById('dfa-output').innerHTML = '';
+            document.getElementById('min-dfa-output').innerHTML = '';
+
+            // 这里应该是实际的处理逻辑
+            // 为了演示，我们使用一些模拟数据
+            logOutput('正在处理正则表达式: ' + regex);
+            logOutput('使用修饰符: ' + modifiers);
+
+            setTimeout(() => {
+                const enfaData = generateMockMermaidData('e-NFA');
+                const dfaData = generateMockMermaidData('DFA');
+                const minDfaData = generateMockMermaidData('Minimized DFA');
+
+                document.getElementById('enfa-data').value = enfaData;
+                document.getElementById('dfa-data').value = dfaData;
+                document.getElementById('min-dfa-data').value = minDfaData;
+
+                logOutput('处理完成');
+            }, 1000);
+        }
+
+        function logOutput(message) {
+            const logElement = document.getElementById('output-log');
+            logElement.innerHTML += message + '<br>';
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+
+        /*
+        function renderMermaid(dataId, outputId) {
+            const data = document.getElementById(dataId).value;
+            const output = document.getElementById(outputId);
+            output.innerHTML = '';
+            mermaid.render('mermaid-' + outputId, data, (svgCode) => {
+                output.innerHTML = svgCode;
+            });
+     
+            /*
+			mermaid.render(`mermaid-${outputId}`, data)
+                .then(({ svg }) => {
+                    output.innerHTML = svg;
+                })
+                .catch(error => {
+                    console.error('Mermaid 渲染错误:', error);
+                    output.innerHTML = '图表渲染失败';
+                });
+                */
+        //}
+        //  
+
+        function generateMockMermaidData(type) {
+            return `
+graph TD;
+    0(0-S-E)  --c--> 5(5-E);
+    0(0-S-E)  --a--> 1;
+    5(5-E)  --c--> 5(5-E);
+    4(4-E)  --c--> 4(4-E);
+    3(3-E)  --c--> 4(4-E);
+    3(3-E)  --a--> 1;
+    2(2-E)  --a--> 1;
+    1  --b--> 2(2-E);
+    5(5-E)  --a--> 1;
+    4(4-E)  --a--> 1;
+    2(2-E)  --c--> 3(3-E);
+    style 3 fill:#f9f,stroke:#333,stroke-width:4px;
+    style 0 fill:#f9f,stroke:#333,stroke-width:4px;
+    style 5 fill:#f9f,stroke:#333,stroke-width:4px;
+    style 4 fill:#f9f,stroke:#333,stroke-width:4px;
+    style 2 fill:#f9f,stroke:#333,stroke-width:4px`;
+        }
+    </script>
+</body>
+</html>
