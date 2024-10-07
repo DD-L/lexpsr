@@ -51,6 +51,21 @@ public:
 
     template <class V>
     void ordered_push(V&& value) {
+        if (base_type::empty()) {
+            base_type::push_back(std::forward<V>(value));
+            return;
+        }
+
+        const T& max_value = base_type::back();
+        if (max_value == value) {
+            return;
+        }
+
+        if (max_value < value) {
+            base_type::push_back(std::forward<V>(value));
+            return;
+        }
+
         base_type::push_back(std::forward<V>(value));
         make_ordered_unique_mut_vec(*this);
     }
@@ -1224,39 +1239,20 @@ class EpsilonNFA : public details::FABase
 
 public:
     bool move_func(State s1, Edge edge, const std::vector<State>& s2) {
-        if (s2.empty() || (!valid_edge(edge)) || invalid_state == s1) {
+        if (!update_move_functions(s1, edge, s2)) {
             return false;
         }
         //if (epsilon == edge || s2.size() > 1u) {
         //    m_is_already_dfa = false; // 加速 to_dfa
         //}
 
-        edge_to_states_t& edge_to_states = m_move_func[s1];
-        ordered_unique_vec<State>& to_states = edge_to_states[edge];
-
-        for (State s : s2) {
-            if (s == s1 && epsilon == edge) {
-                continue; // 排除掉 s1 -- ε --> s1
-            }
-            if (invalid_state == s) {
-                return false;
-            }
-            to_states.push_back(s); // 后续再集中 make_ordered_unique
-        }
-        make_ordered_unique_mut_vec(to_states);
-
         // 收集输入的边
-        if (!m_input_edges.binary_search(edge))
-        {
+        if (!m_input_edges.binary_search(edge)) {
             m_input_edges.ordered_push(edge);
         }
 
         // 收集输入的状态
-        m_input_states.push_back(s1);
-        m_input_states.insert(m_input_states.end(), s2.begin(), s2.end());
-        make_ordered_unique_mut_vec(m_input_states);
-
-        return true;
+        return update_input_states(s1, s2);
     }
 
     void final_states(const std::vector<State>& s) {
@@ -1784,6 +1780,90 @@ private:
             }
         }
         return dfa_state;
+    }
+
+    bool update_move_functions(State s1, Edge edge, const std::vector<State>& s2) {
+        if (s2.empty() || (!valid_edge(edge)) || invalid_state == s1) {
+            return false;
+        }
+
+        edge_to_states_t& edge_to_states = m_move_func[s1];
+        ordered_unique_vec<State>& to_states = edge_to_states[edge];
+
+        bool speed_up_state = false;
+        if (1u == s2.size()) {
+            State s = s2.back();
+            if (invalid_state == s) {
+                return false; // 致命错误
+            }
+
+            if (s == s1 && epsilon == edge) {
+                speed_up_state = true; // 排除掉 s1 -- ε --> s1
+            }
+            else if (to_states.empty()) {
+                to_states.push_back(s);
+                speed_up_state = true;
+            }
+            else {
+                State mstate = to_states.back();
+                if (mstate == s) {
+                    speed_up_state = true;
+                }
+                else if (mstate < s) {
+                    to_states.push_back(s);
+                    speed_up_state = true;
+                }
+                // else { assert(!speed_up_state); }
+            }
+        }
+        // else { assert(!speed_up_state); }
+
+        if (!speed_up_state) { // 常规 update_to_states
+            for (State s : s2) {
+                if (s == s1 && epsilon == edge) {
+                    continue; // 排除掉 s1 -- ε --> s1
+                }
+                if (invalid_state == s) {
+                    return false;
+                }
+                to_states.push_back(s); // 后续再集中 make_ordered_unique
+            }
+            make_ordered_unique_mut_vec(to_states);
+        }
+        return true;
+    }
+
+    bool update_input_states(State s1, const std::vector<State>& s2) {
+        const bool try_speedy1 = try_speedy_update_input_state(s1);
+        const bool try_speedy2 = s2.size() == 1u && try_speedy_update_input_state(s2.back());
+        if (!try_speedy1) {
+            m_input_states.push_back(s1);
+        }
+        if (!try_speedy2) {
+            m_input_states.insert(m_input_states.end(), s2.begin(), s2.end());
+        }
+
+        if (!try_speedy1 || !try_speedy2) {
+            make_ordered_unique_mut_vec(m_input_states); // 集中排序
+        }
+        return true;
+    }
+
+    bool try_speedy_update_input_state(State s) {
+        if (!m_input_states.empty()) {
+            State max_state = m_input_states.back();
+            if (max_state == s) {
+                return true;
+            }
+            if (max_state < s) {
+                m_input_states.push_back(s);
+                return true;
+            }
+            return false;
+        }
+
+        m_input_states.push_back(s); // empty
+        return true;
     }
 
     State enfa_max_input_state() const {
