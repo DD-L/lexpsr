@@ -80,7 +80,15 @@ public:
         ordered_insert(base_type::end(), vec.begin(), vec.end());
     }
 
+    void ordered_insert(base_type& vec) { // 防止被 ordered_insert(Args&&... args) 版本污染
+        ordered_insert(base_type::end(), vec.begin(), vec.end());
+    }
+
     void ordered_insert(const ordered_unique_vec<T>& vec) {
+        ordered_insert(static_cast<const base_type&>(vec));
+    }
+
+    void ordered_insert(ordered_unique_vec<T>& vec) { // 防止被 ordered_insert(Args&&... args) 版本污染
         ordered_insert(static_cast<const base_type&>(vec));
     }
 
@@ -1255,6 +1263,30 @@ public:
         return update_input_states(s1, s2);
     }
 
+    bool move_func(State s1, std::vector<Edge>& edges, const std::vector<State>& s2) {
+        return move_func(s1, make_ordered_unique_mut_vec(edges), s2);
+    }
+    bool move_func(State s1, std::vector<Edge>&& edges, const std::vector<State>& s2) {
+        return move_func(s1, make_ordered_unique_mut_vec(edges), s2);
+    }
+
+    bool move_func(State s1, const ordered_unique_vec<Edge>& ordered_edges, const std::vector<State>& s2) {
+        for (Edge e : ordered_edges) {
+            if (!update_move_functions(s1, e, s2)) {
+                return false;
+            }
+        }
+
+        if (m_input_edges.empty()) {
+            m_input_edges = ordered_edges;
+        }
+        else {
+            m_input_edges.ordered_insert(ordered_edges);
+        }
+
+        return update_input_states(s1, s2);
+    }
+
     void final_states(const std::vector<State>& s) {
         m_final_states.ordered_assgin_vec(s);
     }
@@ -1858,6 +1890,12 @@ private:
             if (max_state < s) {
                 m_input_states.push_back(s);
                 return true;
+            }
+
+            if (m_input_states.size() > 128u) { // 有必要???? @TODO
+                if (m_input_states.binary_search(s)) {
+                    return true;
+                }
             }
             return false;
         }
