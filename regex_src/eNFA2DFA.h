@@ -42,7 +42,7 @@ template <class T>
 class ordered_unique_vec : public std::vector<T> {
     typedef std::vector<T> base_type;
 public:
-    using base_type::vector;
+    using base_type::base_type;
 
     template <class V>
     bool binary_search(V&& value) const {
