@@ -149,7 +149,7 @@
         // Load the module
         MyModule().then(Module => {
 
-            var regexBuilder = new Module.RegexBuilder();
+            const regexBuilder = new Module.RegexBuilder();
 
             function clear_result() {
                 // 清空之前的结果
@@ -168,24 +168,20 @@
                 const regex = document.getElementById('regex-input').value;
                 //const modifiers = parseInt(document.getElementById('modifiers-input').value) || 0;
                 logOutput('正在处理正则表达式: ' + regex);
+                const caseless = document.getElementById('ignoreCase').checked;
+                const nonGreedy = document.getElementById('nonGreedy').checked;
+                const dotNotAll = document.getElementById('disableDot').checked;
 
-                var modifiers = 0;
-                const CASELESS    = (1 << 0); // i
-                const LESS_MATCH  = (1 << 2); // 非贪婪匹配
-                const DOT_NOT_ALL = (1 << 3); // . 不匹配所有， 与其他正则引擎不同，这里默认 ‘.’ 是匹配所有的
-                // 检查每个复选框的状态
-                if (document.getElementById('ignoreCase').checked) {
+                if (caseless) {
                     logOutput('启用修饰: 忽略大小写');
-                    modifiers = modifiers | CASELESS;
                 }
-                if (document.getElementById('nonGreedy').checked) {
+                if (nonGreedy) {
                     logOutput('启用修饰: 非贪婪');
-                    modifiers = modifiers | LESS_MATCH;
                 }
-                if (document.getElementById('disableDot').checked) {
+                if (dotNotAll) {
                     logOutput('启用修饰: 禁用 dot(.) 匹配所有（. 等价于 [^\\r\\n])');
-                    modifiers = modifiers | DOT_NOT_ALL;
                 }
+                var modifiers = Module.CalcModifiers(caseless, nonGreedy, dotNotAll);
                 logOutput('使用修饰符: ' + modifiers);
 
 

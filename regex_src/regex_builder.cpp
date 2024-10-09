@@ -20,7 +20,7 @@ namespace regex {
     enum Flag : uint32_t {
         DEFAULT     = 0,
         CASELESS    = (1 << 0), // i
-        LESS_MATCH  = (1 << 2), // 非贪婪匹配
+        NON_GREEDY  = (1 << 2), // 非贪婪匹配
         DOT_NOT_ALL = (1 << 3), // . 不匹配所有， 与其他正则引擎不同，这里默认 ‘.’ 是匹配所有的
     };
 
@@ -903,7 +903,7 @@ private:
             auto&& ctx = Ctx(args.m_contex);
             std::size_t loop_cnt = args.m_action_material.m_scanner_info;
             assert(loop_cnt <= 1u);
-            if (ctx.m_global_modifiers & (uint32_t)Flag::LESS_MATCH) { // 全局非贪婪匹配
+            if (ctx.m_global_modifiers & (uint32_t)Flag::NON_GREEDY) { // 全局非贪婪匹配
                 ctx.m_loop_less_opt_stack.push_back(1u);
             }
             else {
@@ -1669,7 +1669,7 @@ void test_regex() {
         auto&& ctx = Ctx(args.m_contex);
         std::size_t loop_cnt = args.m_action_material.m_scanner_info;
         assert(loop_cnt <= 1u);
-        if (ctx.m_global_modifiers & (uint32_t)Flag::LESS_MATCH) { // 全局非贪婪匹配
+        if (ctx.m_global_modifiers & (uint32_t)Flag::NON_GREEDY) { // 全局非贪婪匹配
             ctx.m_loop_less_opt_stack.push_back(1u);
         }
         else {
@@ -2225,6 +2225,14 @@ namespace to_wasm {
         return resultObj; // Return the object
     }
 
+	static inline uint32_t CalcModifiers(bool caseless, bool non_greedy, bool dot_not_all) {
+	    uint32_t ret = regex::Flag::DEFAULT;
+		if (caseless)    { ret |= regex::Flag::CASELESS; }
+		if (non_greedy)  { ret |= regex::Flag::NON_GREEDY; }
+		if (dot_not_all) { ret |= regex::Flag::DOT_NOT_ALL; }
+		return ret;
+	}
+
 } // to_wasm
 EMSCRIPTEN_BINDINGS(my_module) {
 
@@ -2246,6 +2254,7 @@ EMSCRIPTEN_BINDINGS(my_module) {
         //.property("x", &MyClass::getX, &MyClass::setX)
         //.class_function("ast_to_nfa", &RegexBuilder::ast_to_nfa);
 
+    emscripten::function("CalcModifiers", &to_wasm::CalcModifiers);
     emscripten::function("RegexBuilderToAST", &to_wasm::RegexBuilderToAST);
     emscripten::function("DumpAST", &regex::Dump);
     emscripten::function("ASTToNFA", &to_wasm::ASTToNFA);
