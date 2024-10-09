@@ -42,7 +42,7 @@ template <class T>
 class ordered_unique_vec : public std::vector<T> {
     typedef std::vector<T> base_type;
 public:
-    using base_type::base_type;
+    using  base_type::base_type;
 
     template <class V>
     bool binary_search(V&& value) const {
@@ -167,6 +167,14 @@ namespace details {
 
         bool is_final_state(State state) const {
             return m_final_states.binary_search(state);
+        }
+
+        State get_start_state() const {
+            return m_start_state;
+        }
+
+        const ordered_unique_vec<State>& get_final_states() const {
+            return m_final_states;
         }
 
         std::string get_state_name(State s) const {
@@ -301,7 +309,7 @@ namespace details {
 
     protected:
         State                       m_start_state = invalid_state;
-        ordered_unique_vec<State>    m_final_states;
+        ordered_unique_vec<State>   m_final_states;
     }; // class FABase
 } // namespace details
 

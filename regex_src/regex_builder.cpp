@@ -551,6 +551,832 @@ namespace regex {
     }
 } // namespace regex
 
+class RegexBuilder {
+public:
+    RegexBuilder() // : m_root(lexpsr_shell::named_v, "root") {
+                    : m_root(std::make_shared<lexpsr_shell::Parser>(lexpsr_shell::UnbindPsr()), "root")
+                    , m_group(std::make_shared<lexpsr_shell::Parser>(lexpsr_shell::UnbindPsr()), "group") {
+       init();
+    }
+
+    bool to_ast(const std::string& regex, uint32_t modifiers, regex::RegexAST& ast, std::string& err) const {
+        using namespace lexpsr_shell;
+        using namespace regex;
+
+        //RegexAST ast;
+        Context ctx(ast);
+        std::size_t offset = 0;
+        err.clear();
+
+        //auto reset = [&ctx, &offset, &err]() {
+        //    ctx.Reset();
+        //    offset = 0;
+        //    err.clear();
+        //};
+
+        ctx.m_global_modifiers = modifiers;
+        const std::string& script = regex;
+        ScanState ss = m_root.ScanScript(script.data(), script.size(), offset, ctx, err);
+        if (ScanState::OK != ss || script.size() != offset) {
+            const std::string error_prompts = ctx.ErrorPrompts(offset, script);
+            //std::cerr << err << std::endl;
+            //std::cerr << error_prompts << std::endl;
+            err += ("\r\n" + error_prompts + "\r\n");
+            return false;
+        }
+        else {
+            assert(script.size() == offset);
+            auto res = InvokeActions(ctx, err);
+            if (!res.first) {
+                //std::cerr << err << std::endl;
+                return false;
+            }
+
+            // assert(res.first);  // test !!!
+        }
+        assert(ScanState::OK == ss && script.size() == offset); // test !!!
+        ctx.Finish();
+        return true;
+        //const std::string dump = regex::Dump(ast);
+        //assert(dump == cs.result);  // test !!!
+    }
+
+    static bool ast_to_nfa(const regex::RegexAST& ast, finite_automata::EpsilonNFA& nfa, std::string& err) {
+        return regex::ToEpsilonNFA(ast, nfa, err);
+    }
+
+private:
+    typedef regex::RegexAST RegexAST;
+    struct Context : lexpsr_shell::core::Context {
+        explicit Context(RegexAST& ast) : m_ast(ast) {}
+        void Reset() {
+            lexpsr_shell::core::Context::Reset();
+
+            m_int_num_stack.clear();
+            m_negative_flag_opt_stack.clear();
+            m_branch_cnt_stack.clear();
+            m_charset_content_stack.clear();
+            m_loop_less_opt_stack.clear();
+            m_loop_flag_opt_stack.clear();
+            m_loop_cnt_range.clear();
+            m_ast_charset_stack.clear();
+            m_ast_node_stack.clear();
+            m_global_modifiers = 0;
+            m_comments_cnt     = 0;
+            ResetLiteralCharsetCnt();
+
+            m_ast.Reset();
+        }
+
+        void ResetLiteralCharsetCnt() {
+            m_literal_charset_cnt = 1u;       // literal 字符集个数，默认为 1
+            m_literal_leading_word_bytes = 0; // literal 默认没有引导词
+        }
+
+        bool Finish() {
+            if (1u == m_ast_node_stack.size()) {
+                m_ast.SetRoot(m_ast_node_stack.back());
+                m_ast_node_stack.pop_back();
+                return true;
+            }
+            return false;
+        }
+
+        std::vector<std::size_t>    m_int_num_stack;
+        std::vector<std::size_t>    m_negative_flag_opt_stack;
+        std::vector<std::size_t>    m_branch_cnt_stack;
+        std::vector<std::size_t>    m_charset_content_stack;
+        std::vector<std::size_t>    m_loop_less_opt_stack; // 非贪婪标识
+        std::vector<std::size_t>    m_loop_flag_opt_stack; // 是否存在显式循环次数标识
+        std::vector<std::pair<std::size_t, std::size_t>> m_loop_cnt_range; // 循环次数
+
+        std::vector<RegexAST::CharSet*>    m_ast_charset_stack;
+        std::vector<RegexAST::Node*>       m_ast_node_stack;
+
+        RegexAST&                          m_ast;
+        uint32_t                           m_global_modifiers = 0;
+        uint32_t                           m_comments_cnt     = 0;  // 注释的计数，用于修正 ac_seq 中的 loop_cnt
+        uint32_t                           m_literal_charset_cnt        = 1;  // literal 字符（集）个数
+        uint32_t                           m_literal_leading_word_bytes = 0;  // literal 引导词的长度，比如 \Q..\E 的引导词长度为 2
+    }; // Context
+    // static const auto Ctx = [](core::Context& ctx) -> Context& { return static_cast<Context&>(ctx); };
+    static Context& Ctx(lexpsr_shell::core::Context& ctx) {
+        return static_cast<Context&>(ctx);
+    }
+
+
+private:
+    bool init() {
+        using namespace lexpsr_shell;
+        using namespace regex;
+        ///////////////////////// actions ///////////////////
+        auto ac_char = [](const ActionArgs& args) {
+            const core::StrRef& tok = args.m_action_material.m_token;
+            assert(1u == tok.len);
+            auto&& ctx = Ctx(args.m_contex);
+            ctx.m_ast_charset_stack.push_back(ctx.m_ast.CreateSingleCharSet(tok[0]));
+            return true;
+        };
+
+        auto ac_hex = [](const ActionArgs& args) {
+            const core::StrRef& tok = args.m_action_material.m_token;
+            assert(2u == tok.len);
+            uint8_t first  = tok[0];
+            uint8_t second = tok[1];
+            auto xx = [](uint8_t c) -> uint8_t {
+                if ('0' <= c && c <= '9') { return c - '0'; }
+                if ('a' <= c && c <= 'f') { return c - 'a' + 10; }
+                assert('A' <= c && c <= 'F');
+                return c - 'A' + 10;
+            };
+            uint8_t res = (xx(first) << 4 | xx(second)) & 0xff;
+            auto&& ctx = Ctx(args.m_contex);
+            ctx.m_ast_charset_stack.push_back(ctx.m_ast.CreateSingleCharSet(res));
+            return true;
+        };
+
+        auto ac_qe_block_content = [](const ActionArgs& args) {
+            const core::StrRef& tok = args.m_action_material.m_token;
+            auto&& ctx = Ctx(args.m_contex);
+            for (std::size_t i = 0; i < tok.len; ++i) {
+                ctx.m_ast_charset_stack.push_back(ctx.m_ast.CreateSingleCharSet(tok[i]));
+            }
+            assert(tok.len <= UINT32_MAX);
+            ctx.m_literal_charset_cnt        = (uint32_t)tok.len; // \Q...\E 的字符（集）个数
+            ctx.m_literal_leading_word_bytes = 2u;                // \Q..\E 的引导词长度为 2 : '\Q' 两个字符
+            return true;
+        };
+
+        auto ac_escape_char_one_alpha = [](const ActionArgs& args) {
+            const core::StrRef& tok = args.m_action_material.m_token;
+            auto&& ctx = Ctx(args.m_contex);
+            assert(2u == tok.len);
+            assert('\\' == tok[0]);
+            RegexAST::CharSet* cs = ctx.m_ast.CreateNormalCharSet(false);
+            assert(cs->IsPositive());
+            const uint8_t escape_char = tok[1];
+            switch (escape_char) { // @TODO 未与 psr 解耦
+                ///// 多字符集 ////
+            case 't': cs->AddDiscrete('\t'); break;
+            case 'n': cs->AddDiscrete('\n'); break;
+            case 'v': cs->AddDiscrete('\v'); break;
+            case 'f': cs->AddDiscrete('\f'); break;
+            case 'r': cs->AddDiscrete('\r'); break;
+            case '0': cs->AddDiscrete('\0'); break;
+            case 'D': cs->SetNegativeFlag(); // [[fallthrough]]
+            case 'd': cs->AddRange('0', '9'); break;
+            case 'S': cs->SetNegativeFlag(); // [[fallthrough]]
+            case 's': cs->AddDiscrete('\t').AddDiscrete('\n').AddDiscrete('\v').AddDiscrete('\f').AddDiscrete('\r').AddDiscrete(' '); break;
+            case 'W': cs->SetNegativeFlag(); // [[fallthrough]]
+            case 'w': cs->AddDiscrete('_').AddRange('0', '9').AddRange('a', 'z').AddRange('A', 'Z'); break;
+            default:
+                cs->~CharSet();
+                new (cs) RegexAST::CharSet(RegexAST::CharSet::SingleCharConstruct, escape_char);
+                assert(cs->IsPositive() && cs->IsSingleChar());
+                break;
+            }
+            ctx.m_ast_charset_stack.push_back(cs);
+            return true;
+        };
+
+        auto ac_char_range = [](const ActionArgs& args) {
+            const core::StrRef& tok = args.m_action_material.m_token;
+            auto&& ctx = Ctx(args.m_contex);
+            assert(ctx.m_ast_charset_stack.size() >= 2u);
+            RegexAST::CharSet* right = ctx.m_ast_charset_stack.back(); ctx.m_ast_charset_stack.pop_back();
+            RegexAST::CharSet* left = ctx.m_ast_charset_stack.back(); // ctx.m_ast_charset_stack.pop_back();
+
+            uint8_t _min = 0, _max = 0;
+            if (left->SingleChar(_min) && right->SingleChar(_max)) {
+                if (_min > _max) {
+                    args.m_error_message = "Range out of order in character class : " + tok.to_std_string();
+                    return false;
+                }
+
+                if (_min != _max) {
+                    left->~CharSet();
+                    new (left) RegexAST::CharSet(RegexAST::CharSet::NormalConstruct, false);
+                    assert(left->IsPositive());
+                    left->AddRange(_min, _max);
+                } // else if (_min == _max) 时等价与 [_min] 无需对 left 做任何变动
+                return true;
+            }
+            args.m_error_message = "logic_error: " + tok.to_std_string(); // 文件要求， [left-right] 必须时 SingleChar
+            return false;
+        };
+
+        auto ac_int_num = [](const ActionArgs& args) {
+            const core::StrRef& tok = args.m_action_material.m_token;
+            auto&& ctx = Ctx(args.m_contex);
+            assert(tok.data && tok.len >= 1u);
+            if (0 == tok.len) { return false; }
+
+            uint64_t value = 0;
+            auto calc = [&value](uint8_t c) {
+                std::size_t old = value;
+                value = value * 10u + (c - '0');
+                if (value < old) {
+                    return false;
+                }
+                return true;
+            };
+
+            for (std::size_t i = 0; i < tok.len; ++i) {
+                if (!calc((uint8_t)tok[i])) {
+                    args.m_error_message = "int_num overflow: " + tok.to_std_string();
+                    return false;
+                }
+            }
+            ctx.m_int_num_stack.push_back(value);
+            return true;
+        };
+
+        auto ac_negative_flag_opt = [](const ActionArgs& args) {
+            auto&& ctx = Ctx(args.m_contex);
+            std::size_t loop_cnt = args.m_action_material.m_scanner_info;
+            assert(loop_cnt <= 1u);
+            ctx.m_negative_flag_opt_stack.push_back(loop_cnt);
+            return true;
+        };
+
+        auto ac_not0x5d = [](const ActionArgs& args) {
+            const core::StrRef& tok = args.m_action_material.m_token;
+            auto&& ctx = Ctx(args.m_contex);
+            assert(1u == tok.len);
+            RegexAST::CharSet* cs = ctx.m_ast.CreateSingleCharSet(tok[0]);
+            ctx.m_ast_charset_stack.push_back(cs);
+            return true;
+        };
+
+        auto ac_charset_content = [](const ActionArgs& args) {
+            Ctx(args.m_contex).m_charset_content_stack.push_back(args.m_action_material.m_scanner_info); // loop_cnt
+            return true;
+        };
+
+        auto ac_charset = [](const ActionArgs& args) {
+            auto&& ctx = Ctx(args.m_contex);
+            assert(!ctx.m_negative_flag_opt_stack.empty());
+            assert(!ctx.m_charset_content_stack.empty());
+
+            bool negative_flag = (0 != ctx.m_negative_flag_opt_stack.back()); // 是否存在负字符集
+            ctx.m_negative_flag_opt_stack.pop_back();
+
+            std::size_t content_cnt = ctx.m_charset_content_stack.back(); ctx.m_charset_content_stack.pop_back();
+            assert(content_cnt <= ctx.m_ast_charset_stack.size());
+            if (0 == content_cnt) { // [] or [^]
+                assert(ctx.m_ast_charset_stack.empty());
+                RegexAST::CharSet* cs = ctx.m_ast.CreateNormalCharSet(negative_flag);
+                ctx.m_ast_charset_stack.push_back(cs);
+                return true;
+            }
+
+            assert(!ctx.m_ast_charset_stack.empty());
+            std::size_t charset_stack_fitsize = ctx.m_ast_charset_stack.size() - content_cnt;
+            auto iter = ctx.m_ast_charset_stack.begin();
+            RegexAST::CharSet* cs = *iter++;
+
+            for (; iter != ctx.m_ast_charset_stack.end(); ++iter) {
+                *cs |= std::move(**iter);
+            }
+            assert(ctx.m_ast_charset_stack.size() >= charset_stack_fitsize + 1u);
+            ctx.m_ast_charset_stack.resize(charset_stack_fitsize + 1u);
+
+            if (negative_flag) {
+                if (cs->IsPositive()) {
+                    cs->SetNegativeFlag();
+                }
+                else {
+                    cs->SetPositiveFlag();
+                }
+            }
+
+            return true;
+        };
+
+        auto ac_dot = [](const ActionArgs& args) {
+            auto&& ctx = Ctx(args.m_contex);
+            RegexAST::CharSet* cs = ctx.m_ast.CreateNormalCharSet(true);
+            assert(cs->IsNegative() && cs->IsAnyChar());
+            if (ctx.m_global_modifiers & (uint32_t)Flag::DOT_NOT_ALL) {
+                cs->AddDiscrete('\r').AddDiscrete('\n');
+            }
+            // 默认“点”是匹配所有字符（与其他正则引擎不同）
+            ctx.m_ast_charset_stack.push_back(cs);
+            return true;
+        };
+
+        auto ac_literal = [](const ActionArgs& args) {
+            const core::StrRef& tok = args.m_action_material.m_token;
+            auto&& ctx = Ctx(args.m_contex);
+            assert(ctx.m_ast_charset_stack.size() >= ctx.m_literal_charset_cnt);
+            if (1u == ctx.m_literal_charset_cnt) { // literal 字符集个数为 1
+                RegexAST::CharSet* cs = ctx.m_ast_charset_stack.back(); ctx.m_ast_charset_stack.pop_back();
+                if (ctx.m_global_modifiers & (uint32_t)Flag::CASELESS) {
+                    cs->ToCaseless();
+                }
+                RegexAST::Node* node = ctx.m_ast.CreateNode(RegexAST::NodeType::CharSet, tok, cs);
+                ctx.m_ast_node_stack.push_back(node);
+            }
+            else if (ctx.m_literal_charset_cnt > 1u){ // literal 字符集个数不为 1，（多字符）可以构成一个序列
+                const std::size_t hold_cnt = ctx.m_ast_charset_stack.size() - ctx.m_literal_charset_cnt;
+                RegexAST::Node* node = ctx.m_ast.CreateNode(RegexAST::NodeType::Sequence, tok);
+                ctx.m_ast_node_stack.push_back(node);
+                // add member
+                for (std::size_t i = 0; i < ctx.m_literal_charset_cnt; ++i) {
+                    RegexAST::CharSet* cs = ctx.m_ast_charset_stack[hold_cnt + i];
+                    if (ctx.m_global_modifiers & (uint32_t)Flag::CASELESS) {
+                        cs->ToCaseless();
+                    }
+                    core::StrRef _tok = { tok.data + ctx.m_literal_leading_word_bytes + i, 1u }; // 一个 CharSet 对应着 一个字符， 还要考虑移除引导词
+                    assert(_tok.data < tok.data + tok.len); // 不能越界
+                    RegexAST::Node* charNode = ctx.m_ast.CreateNode(RegexAST::NodeType::CharSet, _tok, cs);
+                    node->m_member.push_back(charNode);
+                }
+                ctx.m_ast_charset_stack.resize(hold_cnt);
+            } // else // 比如 \Q\E 可以构造出一共空的 literal，对于空的 literal 什么都不生成
+
+            ctx.ResetLiteralCharsetCnt();  // 重置 literal 字符集个数
+            return true;
+        };
+
+        auto ac_loop_less_opt = [](const ActionArgs& args) {
+            auto&& ctx = Ctx(args.m_contex);
+            std::size_t loop_cnt = args.m_action_material.m_scanner_info;
+            assert(loop_cnt <= 1u);
+            if (ctx.m_global_modifiers & (uint32_t)Flag::LESS_MATCH) { // 全局非贪婪匹配
+                ctx.m_loop_less_opt_stack.push_back(1u);
+            }
+            else {
+                ctx.m_loop_less_opt_stack.push_back(loop_cnt);
+            }
+            return true;
+        };
+
+        auto ac_loop_n = [](const ActionArgs& args) {
+            auto&& ctx = Ctx(args.m_contex);
+            assert(ctx.m_int_num_stack.size() >= 1u);
+            std::size_t n = ctx.m_int_num_stack.back(); ctx.m_int_num_stack.pop_back();
+            ctx.m_loop_cnt_range.emplace_back(n, n);
+            return true;
+        };
+        auto ac_loop_mn = [](const ActionArgs& args) {
+            auto&& ctx = Ctx(args.m_contex);
+            assert(ctx.m_int_num_stack.size() >= 2u);
+            std::size_t n = ctx.m_int_num_stack.back(); ctx.m_int_num_stack.pop_back();
+            std::size_t m = ctx.m_int_num_stack.back(); ctx.m_int_num_stack.pop_back();
+            if (m > n) { // 这个判断过程可以转移到 lexpsr 层面解决（它现在有这个表达能力）
+                const core::StrRef& tok = args.m_action_material.m_token;
+                args.m_error_message = tok.to_std_string() + " : numbers out of order in {} quantifier";
+                return false;
+            }
+            ctx.m_loop_cnt_range.emplace_back(m, n);
+            return true;
+        };
+        auto ac_loop_m_comma = [](const ActionArgs& args) {
+            auto&& ctx = Ctx(args.m_contex);
+            assert(ctx.m_int_num_stack.size() >= 1u);
+            std::size_t m = ctx.m_int_num_stack.back(); ctx.m_int_num_stack.pop_back();
+            ctx.m_loop_cnt_range.emplace_back(m, core::Loop::INF_CNT);
+            return true;
+        };
+        auto ac_loop_comma_n = [](const ActionArgs& args) {
+            auto&& ctx = Ctx(args.m_contex);
+            assert(ctx.m_int_num_stack.size() >= 1u);
+            std::size_t n = ctx.m_int_num_stack.back(); ctx.m_int_num_stack.pop_back();
+            ctx.m_loop_cnt_range.emplace_back(0, n);
+            return true;
+        };
+        auto ac_loop_star = [](const ActionArgs& args) {
+            Ctx(args.m_contex).m_loop_cnt_range.emplace_back(0, core::Loop::INF_CNT);
+            return true;
+        };
+        auto ac_loop_plus = [](const ActionArgs& args) {
+            Ctx(args.m_contex).m_loop_cnt_range.emplace_back(1u, core::Loop::INF_CNT);
+            return true;
+        };
+        auto ac_question_mark = [](const ActionArgs& args) {
+            Ctx(args.m_contex).m_loop_cnt_range.emplace_back(0, 1u);
+            return true;
+        };
+        auto ac_loop_flag_opt = [](const ActionArgs& args) {
+            std::size_t loop_cnt = args.m_action_material.m_scanner_info;
+            assert(loop_cnt <= 1u);
+            auto&& ctx = Ctx(args.m_contex);
+            ctx.m_loop_flag_opt_stack.push_back(loop_cnt);
+            return true;
+        };
+        auto ac_loop = [](const ActionArgs& args) {
+            auto&& ctx = Ctx(args.m_contex);
+            bool less = false; // 默认贪婪
+            std::pair<std::size_t, std::size_t> loop_cnt_range = { 1, 1 };
+            bool implicit_cnt = (0 != ctx.m_loop_flag_opt_stack.back()); ctx.m_loop_flag_opt_stack.pop_back();
+            if (implicit_cnt) { // 显式书写了循环次数
+                assert(!ctx.m_loop_cnt_range.empty() && !ctx.m_loop_less_opt_stack.empty());
+                less = !!(ctx.m_loop_less_opt_stack.back()); ctx.m_loop_less_opt_stack.pop_back();
+                loop_cnt_range = ctx.m_loop_cnt_range.back(); ctx.m_loop_cnt_range.pop_back();
+            }
+
+            bool left_eq_right_range = loop_cnt_range.first == loop_cnt_range.second;
+            // 移除了 循环中判断 group 的设计后，可以放心的将 loop 也最小化了
+            if (left_eq_right_range && 1u == loop_cnt_range.first) { // 最小化 loop
+                return true;
+            }
+
+            // 循环体
+            if (ctx.m_ast_node_stack.empty()) {
+                return true; // 兼容空的循环体，比如 (\Q\E){2} 或 (){3,4}
+            }
+            RegexAST::Node* body = ctx.m_ast_node_stack.back(); ctx.m_ast_node_stack.pop_back();
+            RegexAST::Node* node = ctx.m_ast.CreateNode(RegexAST::NodeType::Loop, args.m_action_material.m_token);
+            if (left_eq_right_range && less) { // 这四种情况是同构的： {n,n}? <=> {n}? <=> {n.n} <=> {n}
+                less = false; // 取最简单的（默认状态）: {n}
+            }
+
+            node->m_union_data.m_loop_flag = RegexAST::LoopFlag(loop_cnt_range, less);
+            node->m_member.push_back(body);
+
+            ctx.m_ast_node_stack.push_back(node);
+            return true;
+        };
+        auto ac_comment = [](const ActionArgs& args) {
+            auto&& ctx = Ctx(args.m_contex);
+            ++ctx.m_comments_cnt; // 对注释计数，用于修正 ac_seq 的 loop_cnt
+            return true;
+        };
+        auto ac_seq = [](const ActionArgs& args) {
+            const core::StrRef& tok = args.m_action_material.m_token;
+            auto&& ctx = Ctx(args.m_contex);
+            assert(ctx.m_comments_cnt <= args.m_action_material.m_scanner_info);
+            const std::size_t loop_cnt = args.m_action_material.m_scanner_info - ctx.m_comments_cnt; // 要排除掉注释的影响
+            ctx.m_comments_cnt = 0; // 注释计数用完立刻清零
+            if (ctx.m_ast_node_stack.empty()) { // 没有有效节点
+                assert(0u == loop_cnt || 1u == loop_cnt);
+                return true;
+            }
+            assert(ctx.m_ast_node_stack.size() >= loop_cnt && loop_cnt >= 1u);
+            if (1u == loop_cnt) { // 最小化
+                ctx.m_ast_node_stack.back()->m_context = tok;
+                return true;
+            }
+
+            assert(ctx.m_ast_node_stack.size() >= loop_cnt);
+            const std::size_t hold_cnt = ctx.m_ast_node_stack.size() - loop_cnt;
+            RegexAST::Node* seq = ctx.m_ast.CreateNode(RegexAST::NodeType::Sequence, tok);
+            for (std::size_t i = 0; i < loop_cnt; ++i) {
+                RegexAST::Node* node = ctx.m_ast_node_stack[hold_cnt + i];
+                assert(nullptr != node);
+                if (RegexAST::NodeType::Sequence == node->m_type) { // 合并相邻的 Seq
+                    seq->m_member.insert(seq->m_member.end(), node->m_member.begin(), node->m_member.end());
+                }
+                else {
+                    seq->m_member.push_back(node);
+                }
+            }
+            ctx.m_ast_node_stack.resize(hold_cnt);
+            ctx.m_ast_node_stack.push_back(seq);
+            return true;
+        };
+
+        auto ac_branch_follow_up = [](const ActionArgs& args) {
+            std::size_t loop_cnt = args.m_action_material.m_scanner_info;
+            Ctx(args.m_contex).m_branch_cnt_stack.push_back(loop_cnt);
+            return true;
+        };
+
+        auto ac_branch = [](const ActionArgs& args) {
+            const core::StrRef& tok = args.m_action_material.m_token;
+            auto&& ctx = Ctx(args.m_contex);
+            assert(!ctx.m_branch_cnt_stack.empty());
+            std::size_t branch_cnt = ctx.m_branch_cnt_stack.back() + 1u; ctx.m_branch_cnt_stack.pop_back();
+            if (1u == branch_cnt) { // 最小化
+                if (!ctx.m_ast_node_stack.empty())
+                {
+                    ctx.m_ast_node_stack.back()->m_context = tok;
+                }
+                return true;
+            }
+
+            assert(ctx.m_ast_node_stack.size() >= branch_cnt);
+            const std::size_t hold_cnt = ctx.m_ast_node_stack.size() - branch_cnt;
+            RegexAST::Node* branch = ctx.m_ast.CreateNode(RegexAST::NodeType::Branch, tok);
+            for (std::size_t i = 0; i < branch_cnt; ++i) {
+                RegexAST::Node* node = ctx.m_ast_node_stack[hold_cnt + i];
+                assert(nullptr != node);
+                if (RegexAST::NodeType::Branch == node->m_type) { // 合并相邻的 Branch
+                    branch->m_member.insert(branch->m_member.end(), node->m_member.begin(), node->m_member.end());
+                }
+                else {
+                    branch->m_member.push_back(node);
+                }
+            }
+            ctx.m_ast_node_stack.resize(hold_cnt);
+            ctx.m_ast_node_stack.push_back(branch);
+            return true;
+        };
+
+        /////////////////////////
+        // https://www.debuggex.com/cheatsheet/regex/pcre#/
+        //
+        //                                                   PCRE regex quick reference:
+        //  [abx-z]        One character of: a, b, or the range x-z                     ^          Beginning of the string
+        //  [^abx-z]       One character except: a, b, or the range x-z                 $          End of the string
+        //  a|b            a or b                                                       \d         A digit (same as [0-9])
+        //  a?             Zero or one a's (greedy)                                     \D         A non-digit (same as [^0-9])
+        //  a??            Zero or one a's (lazy)                                       \w         A word character (same as [_a-zA-Z0-9])
+        //  a*             Zero or more a's (greedy)                                    \W         A non-word character (same as [^_a-zA-Z0-9])
+        //  a*?            Zero or more a's (lazy)                                      \s         A whitespace character
+        //  a+             One or more a's (greedy)                                     \S         A non-whitespace character
+        //  a+?            One or more a's (lazy)                                       \b         A word boundary
+        //  a{4}           Exactly 4 a's                                                \B         A non-word boundary
+        //  a{4,8}         Between (inclusive) 4 and 8 a's                              \n         A newline
+        //  a{9,}          9 or more a's                                                \t         A tab
+        //  (?>...)        An atomic group                                              \cY        The control character with the hex code Y
+        //  (?=...)        A positive lookahead                                         \xYY       The character with the hex code YY
+        //  (?!...)        A negative lookahead                                         \uYYYY     The character with the hex code YYYY
+        //  (?<=...)       A positive lookbehind                                        .          Any character
+        //  (?<!...)       A negative lookbehind                                        \Y         The Y'th captured group
+        //  (?:...)        A non-capturing group                                        (?1)       Recurse into numbered group 1
+        //  (...)          A capturing group                                            (?&x)      Recurse into named group x
+        //  (?P<n>...)     A capturing group named n                                    (?P=n)     The captured group named 'n'
+        //  \Q..\E         Remove special meaning                                       (?#...)    A comment (Escapes cannot be handled in comments)
+        // 
+        ///////////////////////////////////////////////////
+        // 
+        //  root          = branch;
+        //  branch        = seq ('|' seq)*; # 目前不允许空串
+        //  seq           = loop+;
+        //  loop          = (group | literal) loop_flag_opt;  # /a/ 等价与 /a{1}/
+        //  group         = '(' ('?' special_group | branch ')');
+        //  special_group = comment | fatal("This group syntax is not yet supported")
+        //  comment       = '#' (next_not(')') any_char)*  ')'
+        //  loop_flag_opt = loop_flag ?;
+        //  loop_flag     = ( '*' | '+' | '?' | loop_n | loop_mn | loop_m_comma | loop_comma_n ) loop_less_opt;
+        //  loop_less_opt = '?'?;
+        //  loop_n        = '{' int_num '}';
+        //  loop_mn       = '{' int_num ',' int_num '}';
+        //  loop_m_comma  = '{' int_num ',}';
+        //  loop_comma_n  = '{,' int_num '}';
+        //  int_num       = /[1-9][0-9]*|0/;
+        //  
+        //  literal       = charset | escape_char | digit | alpha | '.' | punct_char | fatal_if(loop_flag);
+        //  punct_char    = set(R"punct( -<>&:!"'#%,;=@_`~}])punct");  # 非元字符的标点符号，不能出现诸如 "*+?(){[" 等元字符，但注意："}]" 不属于元字符
+        //  chatset       = '[' negative_flag_opt charset_content ']'; # 注意： [^] 表示 [\x00-\xff], NoneOfEmpty; 而 [] 表示空字符集
+        //  negative_flag_opt   = '^'?;
+        //  charset_content     = (char_range | char_range_boundary)*;
+        //  char_range_boundary = escape_char | not0x5d;      # not0x5d 必须在最后，让前面短路它
+        //  not0x5d             = /[^\]]/;
+        //  
+        //  escape_char           = hex | qe_block | escape_char_one_alpha;
+        //  escape_char_one_alpha = '\' set(
+        //                            "tnvfr0dDsSwW"                # 字符集（缩写）
+        //                            R"---(/\.^$*+?()[]{}|-)---"   # 原样输出
+        //                           ); # @TODO 解耦写法 _r : 'r' ... 但没必要
+        //  qe_block              = '\Q' (next_not('\E') .)* '\E'
+        //  char_range            = char_range_boundary '-' char_range_boundary;   # 比如 [\x00-xff] 应当与 [\x00-x]|f 同构
+        //  hex   = $hex();
+        //  alpha = $alpha();
+        //  digit = $digit();
+        //
+        ///////////////////////// parser ////////////////////////
+        psr($digit) = range('0', '9');
+        psr(digit) = $digit                                                                                        <<= ac_char;
+        psr(alpha) = range('a', 'z')('A', 'Z')                                                                     <<= ac_char;
+        psr(hex)   = (R"(\x)", ($digit('a', 'f')('A', 'F')[{2, 2}] | fatal_if(epsilon, "illegal hexadecimal"))     <<= ac_hex);
+
+        psr(qe_block_content)      = (next_not(R"(\E)"), any_char)[any_cnt]                                        <<= ac_qe_block_content; // \Q..\E 内容原样输出
+        psr(qe_block)              = (R"(\Q)", qe_block_content, R"(\E)"_psr[at_most_1]);
+        psr(escape_char_one_alpha) = (R"(\)", (set("tnvfr0dDsSwW" R"---(/\.^$*+?()[]{}|-)---") | fatal_if(epsilon, "unsupported escape character")))   
+                                                                                          <<= ac_escape_char_one_alpha; // 多字符集 & 原样输出
+
+        decl_psr(char_range_boundary);
+
+        psr(char_range)        = (char_range_boundary, "-", char_range_boundary)          <<= ac_char_range;
+        psr(int_num)           = ((range('1', '9'), range('0', '9')[any_cnt]) | "0")      <<= ac_int_num;
+        psr(negative_flag_opt) = "^"_psr[at_most_1]                                       <<= ac_negative_flag_opt; // ("^" | epsilon) 可以省掉一个 stack @TODO
+        psr(punct_char)        = set(R"---( -<>&:!"'#%,;=@_`~}])---")                     <<= ac_char;
+        psr(not0x5d)           = negative_set("]")                                        <<= ac_not0x5d;
+        psr(escape_char)       = hex | qe_block | escape_char_one_alpha;
+        char_range_boundary    = escape_char | not0x5d;
+
+        psr(charset_content)   = (char_range | char_range_boundary)[any_cnt]              <<= ac_charset_content;
+        psr(charset)           = ("[", negative_flag_opt, charset_content, "]")           <<= ac_charset;
+
+        psr(dot) = "." <<= ac_dot;
+        decl_psr(fatal_nothing2repeat); // 绑定 loop_flag
+
+        psr(literal) = (charset | escape_char | digit | alpha | dot | punct_char | fatal_nothing2repeat) <<= ac_literal;
+
+        psr(loop_less_opt) = "?"_psr[at_most_1]                                                          <<= ac_loop_less_opt;
+        psr(loop_n)        = ("{", int_num, "}")                                                         <<= ac_loop_n;
+        psr(loop_mn)       = ("{", int_num, ",", int_num, "}")                                           <<= ac_loop_mn;
+        psr(loop_m_comma)  = ("{", int_num, ",}")                                                        <<= ac_loop_m_comma;
+        psr(loop_comma_n)  = ("{,", int_num, "}")                                                        <<= ac_loop_comma_n;
+
+        psr(loop_star)     = "*" <<= ac_loop_star;
+        psr(loop_plus)     = "+" <<= ac_loop_plus;
+        psr(question_mark) = "?" <<= ac_question_mark;
+
+        psr(loop_flag) = ((loop_star | loop_plus | question_mark | loop_n | loop_mn | loop_m_comma | loop_comma_n), loop_less_opt);
+
+        fatal_nothing2repeat = fatal_if(loop_flag, "nothing to repeat");
+        psr(loop_flag_opt) = loop_flag[at_most_1] <<= ac_loop_flag_opt;  // 这里可以实现成  loop_flag | epsilon 这样就可以省掉一个 stack @TODO
+
+        psr(comment)       = ("#", (next_not(")"), any_char)[any_cnt], ")")    <<= ac_comment;
+        psr(special_group) = comment | fatal_if(epsilon, "This group syntax is not yet supported");
+
+        decl_psr(group);
+
+        psr(loop)   = ((group.weak() | literal), loop_flag_opt)                <<= ac_loop;
+        psr(seq)    = loop[at_least_1]                                         <<= ac_seq;
+        psr(branch) = (seq, ("|", seq)[any_cnt] <<= ac_branch_follow_up)       <<= ac_branch;
+
+        group = ("(", (("?", special_group) | (branch, ")")));
+        psr(root) = branch;
+
+        ////////////////// end parser ///////////////////
+        m_root = root;
+        m_group = group;
+        return true;
+    }
+
+private:
+    lexpsr_shell::Parser m_root;
+    lexpsr_shell::Parser m_group; 
+}; // class RegexBuilder
+
+
+void test_regex2() {
+    using namespace regex;
+    struct Case {
+        const char*    regex;
+        const uint32_t flag;
+        const char*    result;
+    };
+    // S: Seq; B: Branch; L: Loop; C: CharSet
+    std::vector<Case> correct_expressions = {
+
+        { "[abC123]",        0, R"===({C:"1-3,C,a-b"})===" },
+        { "[^0-9_123]",      0, R"===({C:"0x00-0x2f,0x3a-0x5e,0x60-0xff"})===" },
+        { "[a-z][^0-9_123]", 0, R"===({S:[{C:"a-z"},{C:"0x00-0x2f,0x3a-0x5e,0x60-0xff"}]})===" },
+        { "[\\]]",           0, R"===({C:"0x5d"})===" },
+        { "a*",              0, R"===({"L 0,INF":[{C:"a"}]})===" },
+        { "a*a*",            0, R"===({S:[{"L 0,INF":[{C:"a"}]},{"L 0,INF":[{C:"a"}]}]})===" },
+        { "(a*)*",           0, R"===({"L 0,INF":[{"L 0,INF":[{C:"a"}]}]})===" },       // 这里没有经过最小化
+        { "a{1,2}",          0, R"===({"L 1,2":[{C:"a"}]})===" },
+        { "a{1,2}?",         0, R"===({"L 1,2 less":[{C:"a"}]})===" },
+        { "(abc{1}){2}",     0, R"===({"L 2,2":[{S:[{C:"a"},{C:"b"},{C:"c"}]}]})===" }, // c{1} 经过了最小化
+        { "(abc{1}?){2}",    0, R"===({"L 2,2":[{S:[{C:"a"},{C:"b"},{C:"c"}]}]})===" }, // c{1} 经过了最小化
+        { "c{2}?",           0, R"===({"L 2,2":[{C:"c"}]})===" },  // 这里的 less 经过了优化处理
+        { "-",               0, R"===({C:"0x2d"})===" },
+        { "\\r",             0, R"===({C:"0x0d"})===" },
+        { "\\t\\t",          0, R"===({S:[{C:"0x09"},{C:"0x09"}]})===" },
+        { "\\xab\\x12",      0, R"===({S:[{C:"0xab"},{C:"0x12"}]})===" },
+        { "[a-b][1-9]",      0, R"===({S:[{C:"a-b"},{C:"1-9"}]})===" },
+        { "12abc",           0, R"===({S:[{C:"1"},{C:"2"},{C:"a"},{C:"b"},{C:"c"}]})===" },
+        { "ab",              0, R"===({S:[{C:"a"},{C:"b"}]})===" },
+        { "\\r\\n",          0, R"===({S:[{C:"0x0d"},{C:"0x0a"}]})===" },
+        { "  ",              0, R"===({S:[{C:"0x20"},{C:"0x20"}]})===" },
+        { "..",              0, R"===({S:[{C:"0x00-0xff"},{C:"0x00-0xff"}]})===" },
+        { "-a",              0, R"===({S:[{C:"0x2d"},{C:"a"}]})===" },
+        { "--",              0, R"===({S:[{C:"0x2d"},{C:"0x2d"}]})===" },
+        { "-.",              0, R"===({S:[{C:"0x2d"},{C:"0x00-0xff"}]})===" },
+        { "230-.{,2000}",    0, R"===({S:[{C:"2"},{C:"3"},{C:"0"},{C:"0x2d"},{"L 0,2000":[{C:"0x00-0xff"}]}]})===" },
+        { "(230-.{,2000})",  0, R"===({S:[{C:"2"},{C:"3"},{C:"0"},{C:"0x2d"},{"L 0,2000":[{C:"0x00-0xff"}]}]})===" },
+        { "(230-.{,2000})?", 0, R"===({"L 0,1":[{S:[{C:"2"},{C:"3"},{C:"0"},{C:"0x2d"},{"L 0,2000":[{C:"0x00-0xff"}]}]}]})===" },
+        { R"=((230-.{,2000})?(230\s).*?\r\n)=", 0,
+           //R"===({S:[{"L 0,1":[{S:[{C:"2"},{C:"3"},{C:"0"},{C:"0x2d"},{"L 0,2000":[{C:"0x00-0xff"}]}]}]},{S:[{C:"2"},{C:"3"},{C:"0"},{C:"0x09-0x0d,0x20"}]},{"L 0,INF less":[{C:"0x00-0xff"}]},{C:"0x0d"},{C:"0x0a"}]})===" },
+           R"===({S:[{"L 0,1":[{S:[{C:"2"},{C:"3"},{C:"0"},{C:"0x2d"},{"L 0,2000":[{C:"0x00-0xff"}]}]}]},{C:"2"},{C:"3"},{C:"0"},{C:"0x09-0x0d,0x20"},{"L 0,INF less":[{C:"0x00-0xff"}]},{C:"0x0d"},{C:"0x0a"}]})===" }, // Seq 做了合并
+        { "a[/]c",           0, R"===({S:[{C:"a"},{C:"0x2f"},{C:"c"}]})===" },
+        { R"=(a[\/]c)=",     0, R"===({S:[{C:"a"},{C:"0x2f"},{C:"c"}]})===" },
+        { R"=([\S]\s)=",     0, R"===({S:[{C:"0x00-0x08,0x0e-0x1f,0x21-0xff"},{C:"0x09-0x0d,0x20"}]})===" },
+        { R"=([^\D]\d)=",    0, R"===({S:[{C:"0-9"},{C:"0-9"}]})===" },
+        { R"=(\D)=",         0, R"===({C:"0x00-0x2f,0x3a-0xff"})===" },
+        { R"=(\S)=",         0, R"===({C:"0x00-0x08,0x0e-0x1f,0x21-0xff"})===" },
+        { R"=([\x00-\x2f\x3a-\xff])=",                             0, R"===({C:"0x00-0x2f,0x3a-0xff"})===" },
+        { R"=([\x00-\x08\x0e-\x1f\x21-\xff])=",                    0, R"===({C:"0x00-0x08,0x0e-0x1f,0x21-0xff"})===" },
+        { R"=([\x00-\x2f\x3a-\xff\x00-\x08\x0e-\x1f\x21-\xff])=",  0, R"===({C:"0x00-0xff"})===" },
+        { R"=([\D\S])=",     0, R"===({C:"0x00-0xff"})===" },
+        { R"=([^\D\S])=",    0, R"===({C:""})===" },
+        { R"=([^\Dabc])=",   0, R"===({C:"0-9"})===" },
+        { R"=(\xff\x00[][^])=", 0, R"===({S:[{C:"0xff"},{C:"0x00"},{C:""},{C:"0x00-0xff"}]})===" },
+
+        // 注意这里的循环
+        { R"=(.*abc)=",           0, R"===({S:[{"L 0,INF":[{C:"0x00-0xff"}]},{C:"a"},{C:"b"},{C:"c"}]})===" },
+        { R"=(.*?abc)=",          0, R"===({S:[{"L 0,INF less":[{C:"0x00-0xff"}]},{C:"a"},{C:"b"},{C:"c"}]})===" },
+        { R"=(.*(abc))=",         0, R"===({S:[{"L 0,INF":[{C:"0x00-0xff"}]},{C:"a"},{C:"b"},{C:"c"}]})===" }, // Seq 做了合并
+        { R"=(.{2,100}(abc))=",   0, R"===({S:[{"L 2,100":[{C:"0x00-0xff"}]},{C:"a"},{C:"b"},{C:"c"}]})===" }, // Seq 做了合并
+
+        //// 分支
+        { R"=(((abc)|[\D])*)=",   0, R"===({"L 0,INF":[{B:[{S:[{C:"a"},{C:"b"},{C:"c"}]},{C:"0x00-0x2f,0x3a-0xff"}]}]})===" },
+
+        // 忽略大小写
+        { R"=([^\x00-\x60\x7b-\xff])=",  0 | Flag::CASELESS, R"===({C:"A-Z,a-z"})===" }, // [a-z]/i
+        { R"=([^\x00-\x40\x5b-\xff])=",  0 | Flag::CASELESS, R"===({C:"A-Z,a-z"})===" }, // [A-Z]/i
+        { R"=([abC123]abC123)=",         0 | Flag::CASELESS, R"===({S:[{C:"1-3,A-C,a-c"},{C:"A,a"},{C:"B,b"},{C:"C,c"},{C:"1"},{C:"2"},{C:"3"}]})===" },
+        { R"=([a-b]C123)=",              0 | Flag::CASELESS, R"===({S:[{C:"A-B,a-b"},{C:"C,c"},{C:"1"},{C:"2"},{C:"3"}]})===" },
+
+        // dot 不匹配所有: 1. 字符集中的[.] 不被当做元字符处理 2. 启用 DOT_NOT_ALL 不匹配 '\r' 和 '\n' （区别于 hyperscan）
+        { R"=([.].)=", 0 | Flag::DOT_NOT_ALL, R"===({S:[{C:"0x2e"},{C:"0x00-0x09,0x0b-0x0c,0x0e-0xff"}]})===" },
+
+        // 混合 flags
+        { R"=([.abC].abc)=", Flag::CASELESS | Flag::DOT_NOT_ALL, R"===({S:[{C:"0x2e,A-C,a-c"},{C:"0x00-0x09,0x0b-0x0c,0x0e-0xff"},{C:"A,a"},{C:"B,b"},{C:"C,c"}]})===" },
+
+        // charset
+        { R"=([--]])=",    0,  R"===({S:[{C:"0x2d"},{C:"0x5d"}]})===" },
+        { R"=([%-9])=",    0,  R"===({C:"0x25-9"})===" },
+        { R"=([\x00--])=", 0,  R"===({C:"0x00-0x2d"})===" },
+        { R"=([--9])=",    0,  R"===({C:"0x2d-9"})===" },
+        { R"=([---])=",    0,  R"===({C:"0x2d"})===" },
+
+        // 漏掉一个 '\'
+        { R"=([^\x00-x60\x7b-\xff])=", 0, R"===({C:"y-z"})===" },
+        { R"=([\x00-xff])=",           0, R"===({C:"0x00-x"})===" },
+        { R"=([\x00-x]|f)=",           0, R"===({B:[{C:"0x00-x"},{C:"f"}]})===" },
+
+        // 特殊字符 
+        { R"=(]})=",      0, R"===({S:[{C:"0x5d"},{C:"0x7d"}]})===" },
+        { R"=(.{1,3}})=", 0, R"===({S:[{"L 1,3":[{C:"0x00-0xff"}]},{C:"0x7d"}]})===" },
+
+        // 测试 Seq 合并
+        { R"=(\Qabc\Ed)=", 0, R"===({S:[{C:"a"},{C:"b"},{C:"c"},{C:"d"}]})===" },
+        { R"=(\Qabc\Ed\Qe\E\Qfg\E(hi))=", 0, R"===({S:[{C:"a"},{C:"b"},{C:"c"},{C:"d"},{C:"e"},{C:"f"},{C:"g"},{C:"h"},{C:"i"}]})===" },
+
+        // 测试 Branch 合并
+        { R"=(a|(b|cd)|e)=", 0, R"===({B:[{C:"a"},{C:"b"},{S:[{C:"c"},{C:"d"}]},{C:"e"}]})==="},
+
+        // 注释 (?#  commment )
+        { R"=((?#comment\)a(?#)b(?#comment)c)=", 0, R"===({S:[{C:"a"},{C:"b"},{C:"c"}]})===" },   // 注释中不能包含右括号
+        { R"=((?#)(?#comment))=", 0, R"===()===" },   // 测试空正则
+
+        // \Q..\E
+        { R"=(a\Q\Q{1,2}[a-z]\n\\Eb?)=", 0,
+             R"===({S:[{C:"a"},{C:"0x5c"},{C:"Q"},{C:"0x7b"},{C:"1"},{C:"0x2c"},{C:"2"},{C:"0x7d"},{C:"0x5b"},{C:"a"},{C:"0x2d"},{C:"z"},{C:"0x5d"},{C:"0x5c"},{C:"n"},{C:"0x5c"},{"L 0,1":[{C:"b"}]}]})===" },
+        { R"=(\Qab.c\E)=",               0 | Flag::CASELESS,   R"===({S:[{C:"A,a"},{C:"B,b"},{C:"0x2e"},{C:"C,c"}]})===" },  // 测试忽略大小写
+        { R"=(\Q.*[1-5]\x2E)=",          0,                    R"===({S:[{C:"0x2e"},{C:"0x2a"},{C:"0x5b"},{C:"1"},{C:"0x2d"},{C:"5"},{C:"0x5d"},{C:"0x5c"},{C:"x"},{C:"2"},{C:"E"}]})===" },  // 测试无 \E 右边界
+        { R"=(\Q\E)=",                   0,                    R"===()===" },  // 测试 空串
+        { R"=(\Q)=",                     0,                    R"===()===" },  // 测试无 \E 右边界的 空串
+        { R"=((\Q\E){2,3})=",            0,                    R"===()===" },  // 测试空循环体
+    };
+
+    RegexBuilder rbuilder;
+
+    for (const Case& cs : correct_expressions) {
+        const std::string script(cs.regex);
+        RegexAST ast;
+        std::string err;
+        if (!rbuilder.to_ast(script, cs.flag, ast, err)) {
+           std::cerr << err << std::endl;
+           continue;
+        }
+
+        const std::string dump = regex::Dump(ast);
+        assert(dump == cs.result);  // test !!!
+
+        finite_automata::EpsilonNFA enfa;
+        if (rbuilder.ast_to_nfa(ast, enfa, err)) {
+        //if (regex::ToEpsilonNFA(ast, enfa, err)) {
+            std::cout << script << std::endl;
+            std::cout << cs.flag << std::endl;
+            std::cout << dump << std::endl;
+            std::cout << enfa.to_mermaid("\n") << std::endl;
+            std::cout << std::endl;
+        }
+        else {
+            std::cout << script << std::endl;
+            std::cout << cs.flag << std::endl;
+            std::cout << dump << std::endl;
+            std::cerr << err << std::endl;
+            std::cout << std::endl;
+        }
+    }
+
+    // 错误的正则表达式用例
+    std::vector<std::pair<std::string, uint32_t>> wrong_expression = {
+        { "a**",       0 }, // nothing to repeat
+        { "a{1,2}??",  0 }, // nothong to repeat
+        { R"=(\x0w)=", 0 }, // 非法的十六进制 : illegal hexadecimal
+        { R"=([a-z][^0-9_123]?????(230-.{,2000})?(230 ).*?\r\n)=", 0 }, // nothing to repeat
+        { R"=(a{3,1})=", 0 }, // m > n : out of order
+        { R"=([7-\r])=", 0 }, // m > n : out of order
+    };
+
+    for (auto&& cs : wrong_expression) {
+        auto global_modifiers = cs.second;
+        std::string err;
+        RegexAST ast;
+        const std::string script(cs.first);
+        if (!rbuilder.to_ast(script, global_modifiers, ast, err)) {
+           std::cerr << err << std::endl;
+        }
+        else {
+           assert(false && "wrong_expression");
+        }
+    }
+
+    std::cout << "-----------" << std::endl;
+
+}
+
 void test_regex() {
     using namespace lexpsr_shell;
     using namespace regex;
@@ -583,7 +1409,7 @@ void test_regex() {
 
         bool Finish() {
             if (1u == m_ast_node_stack.size()) {
-                m_ast.SetRoot(m_ast_node_stack.back()); 
+                m_ast.SetRoot(m_ast_node_stack.back());
                 m_ast_node_stack.pop_back();
                 return true;
             }
@@ -995,7 +1821,7 @@ void test_regex() {
             }
             return true;
         }
-    
+
         assert(ctx.m_ast_node_stack.size() >= branch_cnt);
         const std::size_t hold_cnt = ctx.m_ast_node_stack.size() - branch_cnt;
         RegexAST::Node* branch = ctx.m_ast.CreateNode(RegexAST::NodeType::Branch, tok);
@@ -1016,7 +1842,7 @@ void test_regex() {
 
     /////////////////////////
     // https://www.debuggex.com/cheatsheet/regex/pcre#/
-    // 
+    //
     //                                                   PCRE regex quick reference:
     //  [abx-z]        One character of: a, b, or the range x-z                     ^          Beginning of the string
     //  [^abx-z]       One character except: a, b, or the range x-z                 $          End of the string
@@ -1334,8 +2160,105 @@ void test_regex() {
 } // test_regex
 
 
+
+#ifdef __EMSCRIPTEN__
+#include <emscripten/bind.h>
+namespace to_wasm {
+   static inline emscripten::val NFAToDFA(const finite_automata::EpsilonNFA& nfa, finite_automata::DFA& dfa) {
+        std::string err;
+        bool ret = nfa.to_dfa(dfa, err);
+        emscripten::val resultObj = emscripten::val::object();
+        resultObj.set("result", ret); 
+        resultObj.set("error", err); 
+        return resultObj; // Return the object
+   }
+
+   static inline bool TryMinimizeDFA(finite_automata::DFA& dfa) {
+       return dfa.try_minimize(); // 移除掉默认参数的影响
+   }
+
+
+   template <class FA>
+   static inline std::string ToMermaidImpl(const FA& fa) {
+      constexpr const char* endline = "\r\n";
+      std::string ret = fa.to_mermaid(endline);
+      auto f1 = ret.find_first_of('\n'); 
+      auto f2 = ret.find_last_of('\n'); 
+      if (std::string::npos != f1 && std::string::npos != f2 && f1 <= f2) {
+         ret = ret.substr(f1, f2 - f1);
+         ret += endline;
+         const std::string final_stroke = "stroke:#333,stroke-width:4px";
+         const std::string both_start_final_stroke = "stroke:#fff,stroke-width:0px";
+         for (finite_automata::State s : fa.get_final_states()) {
+            // style 3 fill:#f9f,stroke:#333,stroke-width:4px;
+            const std::string& stroke = fa.is_start_state(s) ? both_start_final_stroke : final_stroke;
+            ret += "    style " + std::to_string(s) + " fill:#f9f," + stroke + ";" + endline;
+         }
+      }
+      return ret;
+   }
+
+   static inline std::string NFAToMermaid(const finite_automata::EpsilonNFA& nfa) {
+       return ToMermaidImpl(nfa);
+   }
+
+   static inline std::string DFAToMermaid(const finite_automata::DFA& dfa) {
+       return ToMermaidImpl(dfa);
+   }
+
+   static inline emscripten::val RegexBuilderToAST(const RegexBuilder& builder, const std::string& regex, uint32_t modifiers, regex::RegexAST& ast) {
+        std::string err;
+        bool ret = builder.to_ast(regex, modifiers, ast, err);
+        emscripten::val resultObj = emscripten::val::object();
+        resultObj.set("result", ret);
+        resultObj.set("error", err);
+        return resultObj; // Return the object
+   }
+
+    // regex::ToEpsilonNFA(ast, nfa, err)
+    static inline emscripten::val ASTToNFA(const regex::RegexAST& ast, finite_automata::EpsilonNFA& nfa) {
+        std::string err;
+        bool ret = regex::ToEpsilonNFA(ast, nfa, err);
+        emscripten::val resultObj = emscripten::val::object();
+        resultObj.set("result", ret);
+        resultObj.set("error", err);
+        return resultObj; // Return the object
+    }
+
+} // to_wasm
+EMSCRIPTEN_BINDINGS(my_module) {
+
+    emscripten::class_<regex::RegexAST>("RegexAST")
+        .constructor<>();
+
+    emscripten::class_<finite_automata::EpsilonNFA>("EpsilonNFA")
+        .constructor<>();
+        //.function("to_dfa", &finite_automata::EpsilonNFA::to_dfa, emscripten::allow_raw_pointers());
+        //.function("to_dfa", &::finite_automata::EpsilonNFA::to_dfa, emscripten::allow_raw_pointer<emscripten::arg<1>>());
+
+    emscripten::class_<finite_automata::DFA>("DFA")
+        .constructor<>();
+        //.function("to_mermaid", &finite_automata::DFA::to_mermaid);
+
+    emscripten::class_<RegexBuilder>("RegexBuilder")
+        .constructor<>();
+        //.function("to_ast", &RegexBuilder::to_ast)
+        //.property("x", &MyClass::getX, &MyClass::setX)
+        //.class_function("ast_to_nfa", &RegexBuilder::ast_to_nfa);
+
+    emscripten::function("RegexBuilderToAST", &to_wasm::RegexBuilderToAST);
+    emscripten::function("DumpAST", &regex::Dump);
+    emscripten::function("ASTToNFA", &to_wasm::ASTToNFA);
+    emscripten::function("NFAToMermaid", &to_wasm::NFAToMermaid);
+    emscripten::function("NFAToDFA", &to_wasm::NFAToDFA);
+    emscripten::function("DFAToMermaid", &to_wasm::DFAToMermaid);
+    emscripten::function("TryMinimizeDFA", &to_wasm::TryMinimizeDFA);
+}
+#else
 int main()
 {
+    test_regex2();
     test_regex();
     return 0;
 }
+#endif // __EMSCRIPTEN__

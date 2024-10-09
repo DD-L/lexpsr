@@ -62,7 +62,19 @@
     <div class="input-area">
         <input type="text" id="regex-input" placeholder="输入正则表达式">
         <br>
-        <input type="text" id="modifiers-input" placeholder="输入修饰符">
+        <!-- input type="text" id="modifiers-input" placeholder="输入修饰符" -->
+
+        <label>
+            <input type="checkbox" id="ignoreCase">忽略大小写  &nbsp;&nbsp; | &nbsp;&nbsp;
+        </label>
+        <label>
+            <input type="checkbox" id="nonGreedy">非贪婪  &nbsp;&nbsp; | &nbsp;&nbsp;
+        </label>
+        <label>
+            <input type="checkbox" id="disableDot">禁用 dot(.) 匹配所有（. 等价于 [^\r\n]）
+        </label>
+
+        <br>
         <button id="generate-button">生成结果</button>
     </div>
     
@@ -130,103 +142,105 @@
         }
 
         window.renderMermaid = renderMermaid;
-        // 等待 DOM 加载完后绑定事件
-        window.addEventListener('DOMContentLoaded', () => {
-            document.getElementById("render-button").addEventListener("click", renderMermaid);
-        });
     </script>
 
-    <script>
-        //mermaid.initialize({ startOnLoad: false });
-        // 等待 DOM 完全加载后再初始化 Mermaid
-        //document.addEventListener('DOMContentLoaded', function() {
-        //    mermaid.initialize({ 
-        //        startOnLoad: false,
-        //        securityLevel: 'loose'
-        //    });
-        //});
+    <script src="js/regex_builder.js"></script>
+    <script> 
+        // Load the module
+        MyModule().then(Module => {
 
-        document.getElementById('generate-button').addEventListener('click', generateResults);
-        //document.getElementById("render-button").addEventListener("click", renderMermaid);
+            var regexBuilder = new Module.RegexBuilder();
 
-        function generateResults() {
-            const regex = document.getElementById('regex-input').value;
-            const modifiers = document.getElementById('modifiers-input').value;
-            
-            // 清空之前的结果
-            document.getElementById('output-log').innerHTML = '';
-            document.getElementById('enfa-data').value = '';
-            document.getElementById('dfa-data').value = '';
-            document.getElementById('min-dfa-data').value = '';
-            document.getElementById('enfa-output').innerHTML = '';
-            document.getElementById('dfa-output').innerHTML = '';
-            document.getElementById('min-dfa-output').innerHTML = '';
+            function clear_result() {
+                // 清空之前的结果
+                document.getElementById('output-log').innerHTML = '';
+                document.getElementById('enfa-data').value = '';
+                document.getElementById('dfa-data').value = '';
+                document.getElementById('min-dfa-data').value = '';
+                document.getElementById('enfa-output').innerHTML = '';
+                document.getElementById('dfa-output').innerHTML = '';
+                document.getElementById('min-dfa-output').innerHTML = '';
+            }
 
-            // 这里应该是实际的处理逻辑
-            // 为了演示，我们使用一些模拟数据
-            logOutput('正在处理正则表达式: ' + regex);
-            logOutput('使用修饰符: ' + modifiers);
+            function calc() {
+                clear_result();
 
-            setTimeout(() => {
-                const enfaData = generateMockMermaidData('e-NFA');
-                const dfaData = generateMockMermaidData('DFA');
-                const minDfaData = generateMockMermaidData('Minimized DFA');
+                const regex = document.getElementById('regex-input').value;
+                //const modifiers = parseInt(document.getElementById('modifiers-input').value) || 0;
+                logOutput('正在处理正则表达式: ' + regex);
 
+                var modifiers = 0;
+                const CASELESS    = (1 << 0); // i
+                const LESS_MATCH  = (1 << 2); // 非贪婪匹配
+                const DOT_NOT_ALL = (1 << 3); // . 不匹配所有， 与其他正则引擎不同，这里默认 ‘.’ 是匹配所有的
+                // 检查每个复选框的状态
+                if (document.getElementById('ignoreCase').checked) {
+                    logOutput('启用修饰: 忽略大小写');
+                    modifiers = modifiers | CASELESS;
+                }
+                if (document.getElementById('nonGreedy').checked) {
+                    logOutput('启用修饰: 非贪婪');
+                    modifiers = modifiers | LESS_MATCH;
+                }
+                if (document.getElementById('disableDot').checked) {
+                    logOutput('启用修饰: 禁用 dot(.) 匹配所有（. 等价于 [^\\r\\n])');
+                    modifiers = modifiers | DOT_NOT_ALL;
+                }
+                logOutput('使用修饰符: ' + modifiers);
+
+
+ 
+                var ast = new Module.RegexAST(); 
+                const res1 = Module.RegexBuilderToAST(regexBuilder, regex, modifiers, ast);
+                if (!res1.result) {
+                   logOutput('转换 AST 错误: ' + res1.error.replace(/\n/g, '<br>'));
+                   return;
+                }
+
+                const astStr = Module.DumpAST(ast);
+                logOutput('AST: ' + astStr);
+
+                var nfa = new Module.EpsilonNFA();
+                const res2 = Module.ASTToNFA(ast, nfa);
+                if (!res2.result) {
+                   logOutput('AST 转换 NFA 错误: ' + res2.error.replace(/\n/g, '<br>'));
+                   return;
+                }
+
+                const enfaData = Module.NFAToMermaid(nfa); 
                 document.getElementById('enfa-data').value = enfaData;
+
+                var dfa = new Module.DFA(); 
+                const res3 = Module.NFAToDFA(nfa, dfa);
+                if (!res3.result) {
+                   logOutput('NFA 转换 DFA 错误: ' + res3.error.replace(/\n/g, '<br>'));
+                   return;
+                }
+
+                const dfaData = Module.DFAToMermaid(dfa); 
                 document.getElementById('dfa-data').value = dfaData;
-                document.getElementById('min-dfa-data').value = minDfaData;
+
+                if (!Module.TryMinimizeDFA(dfa)) {
+                   logOutput('尝试极小化 DFA 失败!');
+                   //document.getElementById('min-dfa-data').value = dfaData;
+                }
+                else {
+                   const minDfaData = Module.DFAToMermaid(dfa);
+                   document.getElementById('min-dfa-data').value = minDfaData;
+                }
+
 
                 logOutput('处理完成');
-            }, 1000);
-        }
+
+            } // function calc
+            // function.calc = calc;
+            document.getElementById('generate-button').addEventListener('click', calc);
+        });
 
         function logOutput(message) {
             const logElement = document.getElementById('output-log');
             logElement.innerHTML += message + '<br>';
             logElement.scrollTop = logElement.scrollHeight;
-        }
-
-        /*
-        function renderMermaid(dataId, outputId) {
-            const data = document.getElementById(dataId).value;
-            const output = document.getElementById(outputId);
-            output.innerHTML = '';
-            mermaid.render('mermaid-' + outputId, data, (svgCode) => {
-                output.innerHTML = svgCode;
-            });
-     
-            /*
-			mermaid.render(`mermaid-${outputId}`, data)
-                .then(({ svg }) => {
-                    output.innerHTML = svg;
-                })
-                .catch(error => {
-                    console.error('Mermaid 渲染错误:', error);
-                    output.innerHTML = '图表渲染失败';
-                });
-                */
-        //}
-        //  
-
-        function generateMockMermaidData(type) {
-            return `
-graph TD;
-    0(0-S-E)  --c--> 5(5-E);
-    0(0-S-E)  --a--> 1;
-    5(5-E)  --c--> 5(5-E);
-    4(4-E)  --c--> 4(4-E);
-    3(3-E)  --c--> 4(4-E);
-    3(3-E)  --a--> 1;
-    2(2-E)  --a--> 1;
-    1  --b--> 2(2-E);
-    5(5-E)  --a--> 1;
-    4(4-E)  --a--> 1;
-    2(2-E)  --c--> 3(3-E);
-    style 3 fill:#f9f,stroke:#333,stroke-width:4px;
-    style 0 fill:#f9f,stroke:#333,stroke-width:4px;
-    style 5 fill:#f9f,stroke:#333,stroke-width:4px;
-    style 4 fill:#f9f,stroke:#333,stroke-width:4px;
-    style 2 fill:#f9f,stroke:#333,stroke-width:4px`;
         }
     </script>
 </body>
