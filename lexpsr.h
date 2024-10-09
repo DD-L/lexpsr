@@ -701,7 +701,7 @@ namespace _LEXPARSER_CORE {
             return _Debugger<S, H>(std::forward<Scanner>(scanner), std::forward<Handler>(h));
         }
 
-        Token operator"" _t(const char* str, std::size_t) { return Token(str); }
+        [[maybe_unused]] Token operator"" _t(const char* str, std::size_t) { return Token(str); }
     }
 } // namespace _LEXPARSER_CORE
 
@@ -737,23 +737,23 @@ namespace _LEXPARSER_SHELL
     template <class T> static inline T& _PsrForward(T& v) { return details::Forwarder()(v); }
 
     namespace { //  free function
-        details::LoopCntPair loop_cnt(std::size_t c) noexcept {
+        [[maybe_unused]] details::LoopCntPair loop_cnt(std::size_t c) noexcept {
             return details::LoopCntPair{ c, c };
         }
-        details::LoopCntPair loop_cnt(std::size_t m, std::size_t n) noexcept {
+        [[maybe_unused]] details::LoopCntPair loop_cnt(std::size_t m, std::size_t n) noexcept {
             return details::LoopCntPair{ m, n };
         }
-        details::LoopCntPair any_cnt(details::AnyCnt* = nullptr) {
+        [[maybe_unused]] details::LoopCntPair any_cnt(details::AnyCnt* = nullptr) {
             return details::LoopCntPair{ 0, ~std::size_t(0) };
         }
-        details::LoopCntPair at_least(std::size_t n) noexcept {
+        [[maybe_unused]] details::LoopCntPair at_least(std::size_t n) noexcept {
             return details::LoopCntPair{ n, ~std::size_t(0) };
         }
-        details::LoopCntPair at_least_1(details::AtLeast1* = nullptr) { return at_least(1u); }
-        details::LoopCntPair at_most(std::size_t n) noexcept { return details::LoopCntPair{ 0, n }; }
-        details::LoopCntPair at_most_1(details::AtMost1* = nullptr) { return at_most(1u); }
+        [[maybe_unused]] details::LoopCntPair at_least_1(details::AtLeast1* = nullptr) { return at_least(1u); }
+        [[maybe_unused]] details::LoopCntPair at_most(std::size_t n) noexcept { return details::LoopCntPair{ 0, n }; }
+        [[maybe_unused]] details::LoopCntPair at_most_1(details::AtMost1* = nullptr) { return at_most(1u); }
 
-        void named_v(details::_Named*) {}
+        [[maybe_unused]] void named_v(details::_Named*) {}
     } // namespace free function
 
     namespace tools {
