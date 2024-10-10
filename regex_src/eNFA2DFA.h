@@ -210,6 +210,7 @@ namespace details {
 
             constexpr Edge invalid_last_edge = epsilon - 1;
             Edge last_edge = invalid_last_edge;
+            Edge range_begin = invalid_last_edge;
             bool is_closed = false;
             for (; iter != edges_set.end(); ++iter) {
                 Edge edge = *iter;
@@ -217,16 +218,21 @@ namespace details {
                 is_closed = false;
                 if (edge != last_edge + 1) {
                     if (invalid_last_edge != last_edge) {
-                        ret += ("-" + get_edge_string(last_edge));
+                        if (range_begin != last_edge) {
+                            ret += ("-" + get_edge_string(last_edge));
+                        }
                     }
                     ret += get_edge_string(edge);
+                    range_begin = edge;
                     is_closed = true;
                 }
                 last_edge = edge;
             }
 
             if (!is_closed && valid_edge(last_edge)) {
-                ret += ("-" + get_edge_string(last_edge));
+                if (range_begin != last_edge) {
+                    ret += ("-" + get_edge_string(last_edge));
+                }
             }
 
             return (edges_set.size() == 1u) ? ret : ("[" + ret + "]");
