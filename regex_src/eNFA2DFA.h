@@ -282,7 +282,7 @@ namespace details {
                 const std::string s2_name = (s1 == s2) ? s1_name : get_state_name(s2);
 
 
-                const std::string line = "    " + s1_name + "  --" + edges_str + "--> " + s2_name + ";" + endline;
+                const std::string line = "    " + s1_name + "  -- " + edges_str + " --> " + s2_name + ";" + endline;
 
                 if (is_start_state(s1)) {
                     ret = line + ret;

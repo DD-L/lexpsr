@@ -167,39 +167,47 @@
 
                 const regex = document.getElementById('regex-input').value;
                 //const modifiers = parseInt(document.getElementById('modifiers-input').value) || 0;
-                logOutput('正在处理正则表达式: ' + regex);
+
+
+                //const escapeHtml = (unsafe) => {
+                //    return unsafe.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
+                //};
+                logOutput('--> 正在处理正则表达式: <textarea style="overflow: hidden;height: 20px; width: 100%;" readonly>' + regex + '</textarea>');
                 const caseless = document.getElementById('ignoreCase').checked;
                 const nonGreedy = document.getElementById('nonGreedy').checked;
                 const dotNotAll = document.getElementById('disableDot').checked;
 
                 if (caseless) {
-                    logOutput('启用修饰: 忽略大小写');
+                    logOutput('--> 启用修饰: 忽略大小写');
                 }
                 if (nonGreedy) {
-                    logOutput('启用修饰: 非贪婪');
+                    logOutput('--> 启用修饰: 非贪婪 ');
                 }
                 if (dotNotAll) {
-                    logOutput('启用修饰: 禁用 dot(.) 匹配所有（. 等价于 [^\\r\\n])');
+                    logOutput('--> 启用修饰: 禁用 dot(.) 匹配所有（. 等价于 [^\\r\\n]) ');
                 }
-                var modifiers = Module.CalcModifiers(caseless, nonGreedy, dotNotAll);
-                logOutput('使用修饰符: ' + modifiers);
+                const modifiers = Module.CalcModifiers(caseless, nonGreedy, dotNotAll);
+                logOutput('--> 使用修饰符: ' + modifiers);
 
 
  
                 var ast = new Module.RegexAST(); 
                 const res1 = Module.RegexBuilderToAST(regexBuilder, regex, modifiers, ast);
                 if (!res1.result) {
-                   logOutput('转换 AST 错误: ' + res1.error.replace(/\n/g, '<br>'));
+                   //const errorMsg = escapeHtml(res1.error).replace(/\n/g, '<br>');
+                   const monospaceText = `<textarea style="overflow: hidden;height: 40px; width: 100%;" readonly>` + res1.error  + `</textarea>`;
+                   logOutput('--> 转换 AST 错误: ' + monospaceText);
+                   console.log('转换 AST 错误: ' + res1.error);
                    return;
                 }
 
                 const astStr = Module.DumpAST(ast);
-                logOutput('AST: ' + astStr);
+                logOutput('--> AST:  <br>' + astStr);
 
                 var nfa = new Module.EpsilonNFA();
                 const res2 = Module.ASTToNFA(ast, nfa);
                 if (!res2.result) {
-                   logOutput('AST 转换 NFA 错误: ' + res2.error.replace(/\n/g, '<br>'));
+                   logOutput('--> AST 转换 NFA 错误: ' + res2.error.replace(/\n/g, '<br>'));
                    return;
                 }
 
@@ -209,7 +217,7 @@
                 var dfa = new Module.DFA(); 
                 const res3 = Module.NFAToDFA(nfa, dfa);
                 if (!res3.result) {
-                   logOutput('NFA 转换 DFA 错误: ' + res3.error.replace(/\n/g, '<br>'));
+                   logOutput('--> NFA 转换 DFA 错误: ' + res3.error.replace(/\n/g, '<br>'));
                    return;
                 }
 
@@ -217,7 +225,7 @@
                 document.getElementById('dfa-data').value = dfaData;
 
                 if (!Module.TryMinimizeDFA(dfa)) {
-                   logOutput('尝试极小化 DFA 失败!');
+                   logOutput('--> 尝试极小化 DFA 失败!');
                    //document.getElementById('min-dfa-data').value = dfaData;
                 }
                 else {
@@ -226,7 +234,7 @@
                 }
 
 
-                logOutput('处理完成');
+                logOutput('--> 处理完成');
 
             } // function calc
             // function.calc = calc;
@@ -238,6 +246,7 @@
             logElement.innerHTML += message + '<br>';
             logElement.scrollTop = logElement.scrollHeight;
         }
+
     </script>
 </body>
 </html>

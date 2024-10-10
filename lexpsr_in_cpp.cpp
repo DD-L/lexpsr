@@ -779,7 +779,7 @@ namespace regex {
     enum Flag : uint32_t {
         DEFAULT     = 0,
         CASELESS    = (1 << 0), // i
-        LESS_MATCH  = (1 << 2), // 非贪婪匹配
+        NON_GREEDY  = (1 << 2), // 非贪婪匹配
         DOT_NOT_ALL = (1 << 3), // . 不匹配所有， 与其他正则引擎不同，这里默认 ‘.’ 是匹配所有的
     };
 
@@ -1460,7 +1460,7 @@ void test_regex() {
         auto&& ctx = Ctx(args.m_contex);
         std::size_t loop_cnt = args.m_action_material.m_scanner_info;
         assert(loop_cnt <= 1u);
-        if (ctx.m_global_modifiers & (uint32_t)Flag::LESS_MATCH) { // 全局非贪婪匹配
+        if (ctx.m_global_modifiers & (uint32_t)Flag::NON_GREEDY) { // 全局非贪婪匹配
             ctx.m_loop_less_opt_stack.push_back(1u);
         }
         else {

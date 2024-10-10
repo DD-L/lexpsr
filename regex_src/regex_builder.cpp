@@ -465,6 +465,7 @@ namespace regex {
                     }
                     enfa.move_func(ctx.current_state(), finite_automata::epsilon, nfa_end);
                 }
+                ctx.current_state(end);
                 return true;
             }
             case RegexAST::RegexAST::NodeType::Sequence: {
@@ -1204,16 +1205,39 @@ private:
     lexpsr_shell::Parser m_group; 
 }; // class RegexBuilder
 
+////////////////////////////////////////////////////////////////////////////
 
-void test_regex2() {
+#include <sstream>
+namespace tests {
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
+
+static inline void t_assert_abort(const char* msg, const char* file, unsigned line) {
+    std::cerr << "[FATAL]: \"" << msg << "\", " << file << ":" << line << std::endl;
+    std::abort();
+}
+
+static inline void t_expect(const char* msg, const char* file, unsigned line) {
+    std::cerr << "[UNEXPECTED]: \"" << msg << "\", " << file << ":" << line << std::endl;
+}
+
+#undef TEST_ASSERT
+#define TEST_ASSERT(expression) (void)( (!!(expression)) || (t_assert_abort((#expression), (__FILE__), (unsigned)(__LINE__)), 0) )
+
+#undef TEST_EXPECT
+#define TEST_EXPECT(expression) (void)( (!!(expression)) || (t_expect((#expression), (__FILE__), (unsigned)(__LINE__)), 0) )
+
+namespace lexpsr {
+struct Case {
+	const char*    regex;
+	const uint32_t flag;
+	const char*    result;
+};
+
+static inline std::vector<Case> correct_expressions() {
     using namespace regex;
-    struct Case {
-        const char*    regex;
-        const uint32_t flag;
-        const char*    result;
-    };
     // S: Seq; B: Branch; L: Loop; C: CharSet
-    std::vector<Case> correct_expressions = {
+    std::vector<Case> cases = {
 
         { "[abC123]",        0, R"===({C:"1-3,C,a-b"})===" },
         { "[^0-9_123]",      0, R"===({C:"0x00-0x2f,0x3a-0x5e,0x60-0xff"})===" },
@@ -1318,9 +1342,30 @@ void test_regex2() {
         { R"=((\Q\E){2,3})=",            0,                    R"===()===" },  // 测试空循环体
     };
 
+    return cases;
+} // fuction correct_expressions()
+
+static inline std::vector<std::pair<std::string, uint32_t>> wrong_expressions() {
+    // 错误的正则表达式用例
+    std::vector<std::pair<std::string, uint32_t>> cases = {
+        { "a**",       0 }, // nothing to repeat
+        { "a{1,2}??",  0 }, // nothong to repeat
+        { R"=(\x0w)=", 0 }, // 非法的十六进制 : illegal hexadecimal
+        { R"=([a-z][^0-9_123]?????(230-.{,2000})?(230 ).*?\r\n)=", 0 }, // nothing to repeat
+        { R"=(a{3,1})=", 0 }, // m > n : out of order
+        { R"=([7-\r])=", 0 }, // m > n : out of order
+    };
+    return cases;
+} // function wrong_expressions() 
+
+////////////////////////////////////////////////////////////////
+
+void test_regex2() {
+    using namespace regex;
+
     RegexBuilder rbuilder;
 
-    for (const Case& cs : correct_expressions) {
+    for (const Case& cs : correct_expressions()) {
         const std::string script(cs.regex);
         RegexAST ast;
         std::string err;
@@ -1334,7 +1379,6 @@ void test_regex2() {
 
         finite_automata::EpsilonNFA enfa;
         if (rbuilder.ast_to_nfa(ast, enfa, err)) {
-        //if (regex::ToEpsilonNFA(ast, enfa, err)) {
             std::cout << script << std::endl;
             std::cout << cs.flag << std::endl;
             std::cout << dump << std::endl;
@@ -1350,17 +1394,8 @@ void test_regex2() {
         }
     }
 
-    // 错误的正则表达式用例
-    std::vector<std::pair<std::string, uint32_t>> wrong_expression = {
-        { "a**",       0 }, // nothing to repeat
-        { "a{1,2}??",  0 }, // nothong to repeat
-        { R"=(\x0w)=", 0 }, // 非法的十六进制 : illegal hexadecimal
-        { R"=([a-z][^0-9_123]?????(230-.{,2000})?(230 ).*?\r\n)=", 0 }, // nothing to repeat
-        { R"=(a{3,1})=", 0 }, // m > n : out of order
-        { R"=([7-\r])=", 0 }, // m > n : out of order
-    };
 
-    for (auto&& cs : wrong_expression) {
+    for (auto&& cs : wrong_expressions()) {
         auto global_modifiers = cs.second;
         std::string err;
         RegexAST ast;
@@ -1374,7 +1409,6 @@ void test_regex2() {
     }
 
     std::cout << "-----------" << std::endl;
-
 }
 
 void test_regex() {
@@ -1972,120 +2006,8 @@ void test_regex() {
         err.clear();
     };
 
-    struct Case {
-        const char*    regex;
-        const uint32_t flag;
-        const char*    result;
-    };
-    // S: Seq; B: Branch; L: Loop; C: CharSet
-    std::vector<Case> correct_expressions = {
 
-        { "[abC123]",        0, R"===({C:"1-3,C,a-b"})===" },
-        { "[^0-9_123]",      0, R"===({C:"0x00-0x2f,0x3a-0x5e,0x60-0xff"})===" },
-        { "[a-z][^0-9_123]", 0, R"===({S:[{C:"a-z"},{C:"0x00-0x2f,0x3a-0x5e,0x60-0xff"}]})===" },
-        { "[\\]]",           0, R"===({C:"0x5d"})===" },
-        { "a*",              0, R"===({"L 0,INF":[{C:"a"}]})===" },
-        { "a*a*",            0, R"===({S:[{"L 0,INF":[{C:"a"}]},{"L 0,INF":[{C:"a"}]}]})===" },
-        { "(a*)*",           0, R"===({"L 0,INF":[{"L 0,INF":[{C:"a"}]}]})===" },       // 这里没有经过最小化
-        { "a{1,2}",          0, R"===({"L 1,2":[{C:"a"}]})===" },
-        { "a{1,2}?",         0, R"===({"L 1,2 less":[{C:"a"}]})===" },
-        { "(abc{1}){2}",     0, R"===({"L 2,2":[{S:[{C:"a"},{C:"b"},{C:"c"}]}]})===" }, // c{1} 经过了最小化
-        { "(abc{1}?){2}",    0, R"===({"L 2,2":[{S:[{C:"a"},{C:"b"},{C:"c"}]}]})===" }, // c{1} 经过了最小化
-        { "c{2}?",           0, R"===({"L 2,2":[{C:"c"}]})===" },  // 这里的 less 经过了优化处理
-        { "-",               0, R"===({C:"0x2d"})===" },
-        { "\\r",             0, R"===({C:"0x0d"})===" },
-        { "\\t\\t",          0, R"===({S:[{C:"0x09"},{C:"0x09"}]})===" },
-        { "\\xab\\x12",      0, R"===({S:[{C:"0xab"},{C:"0x12"}]})===" },
-        { "[a-b][1-9]",      0, R"===({S:[{C:"a-b"},{C:"1-9"}]})===" },
-        { "12abc",           0, R"===({S:[{C:"1"},{C:"2"},{C:"a"},{C:"b"},{C:"c"}]})===" },
-        { "ab",              0, R"===({S:[{C:"a"},{C:"b"}]})===" },
-        { "\\r\\n",          0, R"===({S:[{C:"0x0d"},{C:"0x0a"}]})===" },
-        { "  ",              0, R"===({S:[{C:"0x20"},{C:"0x20"}]})===" },
-        { "..",              0, R"===({S:[{C:"0x00-0xff"},{C:"0x00-0xff"}]})===" },
-        { "-a",              0, R"===({S:[{C:"0x2d"},{C:"a"}]})===" },
-        { "--",              0, R"===({S:[{C:"0x2d"},{C:"0x2d"}]})===" },
-        { "-.",              0, R"===({S:[{C:"0x2d"},{C:"0x00-0xff"}]})===" },
-        { "230-.{,2000}",    0, R"===({S:[{C:"2"},{C:"3"},{C:"0"},{C:"0x2d"},{"L 0,2000":[{C:"0x00-0xff"}]}]})===" },
-        { "(230-.{,2000})",  0, R"===({S:[{C:"2"},{C:"3"},{C:"0"},{C:"0x2d"},{"L 0,2000":[{C:"0x00-0xff"}]}]})===" },
-        { "(230-.{,2000})?", 0, R"===({"L 0,1":[{S:[{C:"2"},{C:"3"},{C:"0"},{C:"0x2d"},{"L 0,2000":[{C:"0x00-0xff"}]}]}]})===" },
-        { R"=((230-.{,2000})?(230\s).*?\r\n)=", 0,
-           //R"===({S:[{"L 0,1":[{S:[{C:"2"},{C:"3"},{C:"0"},{C:"0x2d"},{"L 0,2000":[{C:"0x00-0xff"}]}]}]},{S:[{C:"2"},{C:"3"},{C:"0"},{C:"0x09-0x0d,0x20"}]},{"L 0,INF less":[{C:"0x00-0xff"}]},{C:"0x0d"},{C:"0x0a"}]})===" },
-           R"===({S:[{"L 0,1":[{S:[{C:"2"},{C:"3"},{C:"0"},{C:"0x2d"},{"L 0,2000":[{C:"0x00-0xff"}]}]}]},{C:"2"},{C:"3"},{C:"0"},{C:"0x09-0x0d,0x20"},{"L 0,INF less":[{C:"0x00-0xff"}]},{C:"0x0d"},{C:"0x0a"}]})===" }, // Seq 做了合并
-        { "a[/]c",           0, R"===({S:[{C:"a"},{C:"0x2f"},{C:"c"}]})===" },
-        { R"=(a[\/]c)=",     0, R"===({S:[{C:"a"},{C:"0x2f"},{C:"c"}]})===" },
-        { R"=([\S]\s)=",     0, R"===({S:[{C:"0x00-0x08,0x0e-0x1f,0x21-0xff"},{C:"0x09-0x0d,0x20"}]})===" },
-        { R"=([^\D]\d)=",    0, R"===({S:[{C:"0-9"},{C:"0-9"}]})===" },
-        { R"=(\D)=",         0, R"===({C:"0x00-0x2f,0x3a-0xff"})===" },
-        { R"=(\S)=",         0, R"===({C:"0x00-0x08,0x0e-0x1f,0x21-0xff"})===" },
-        { R"=([\x00-\x2f\x3a-\xff])=",                             0, R"===({C:"0x00-0x2f,0x3a-0xff"})===" },
-        { R"=([\x00-\x08\x0e-\x1f\x21-\xff])=",                    0, R"===({C:"0x00-0x08,0x0e-0x1f,0x21-0xff"})===" },
-        { R"=([\x00-\x2f\x3a-\xff\x00-\x08\x0e-\x1f\x21-\xff])=",  0, R"===({C:"0x00-0xff"})===" },
-        { R"=([\D\S])=",     0, R"===({C:"0x00-0xff"})===" },
-        { R"=([^\D\S])=",    0, R"===({C:""})===" },
-        { R"=([^\Dabc])=",   0, R"===({C:"0-9"})===" },
-        { R"=(\xff\x00[][^])=", 0, R"===({S:[{C:"0xff"},{C:"0x00"},{C:""},{C:"0x00-0xff"}]})===" },
-
-        // 注意这里的循环
-        { R"=(.*abc)=",           0, R"===({S:[{"L 0,INF":[{C:"0x00-0xff"}]},{C:"a"},{C:"b"},{C:"c"}]})===" },
-        { R"=(.*?abc)=",          0, R"===({S:[{"L 0,INF less":[{C:"0x00-0xff"}]},{C:"a"},{C:"b"},{C:"c"}]})===" },
-        { R"=(.*(abc))=",         0, R"===({S:[{"L 0,INF":[{C:"0x00-0xff"}]},{C:"a"},{C:"b"},{C:"c"}]})===" }, // Seq 做了合并
-        { R"=(.{2,100}(abc))=",   0, R"===({S:[{"L 2,100":[{C:"0x00-0xff"}]},{C:"a"},{C:"b"},{C:"c"}]})===" }, // Seq 做了合并
-
-        //// 分支
-        { R"=(((abc)|[\D])*)=",   0, R"===({"L 0,INF":[{B:[{S:[{C:"a"},{C:"b"},{C:"c"}]},{C:"0x00-0x2f,0x3a-0xff"}]}]})===" },
-
-        // 忽略大小写
-        { R"=([^\x00-\x60\x7b-\xff])=",  0 | Flag::CASELESS, R"===({C:"A-Z,a-z"})===" }, // [a-z]/i
-        { R"=([^\x00-\x40\x5b-\xff])=",  0 | Flag::CASELESS, R"===({C:"A-Z,a-z"})===" }, // [A-Z]/i
-        { R"=([abC123]abC123)=",         0 | Flag::CASELESS, R"===({S:[{C:"1-3,A-C,a-c"},{C:"A,a"},{C:"B,b"},{C:"C,c"},{C:"1"},{C:"2"},{C:"3"}]})===" },
-        { R"=([a-b]C123)=",              0 | Flag::CASELESS, R"===({S:[{C:"A-B,a-b"},{C:"C,c"},{C:"1"},{C:"2"},{C:"3"}]})===" },
-
-        // dot 不匹配所有: 1. 字符集中的[.] 不被当做元字符处理 2. 启用 DOT_NOT_ALL 不匹配 '\r' 和 '\n' （区别于 hyperscan）
-        { R"=([.].)=", 0 | Flag::DOT_NOT_ALL, R"===({S:[{C:"0x2e"},{C:"0x00-0x09,0x0b-0x0c,0x0e-0xff"}]})===" },
-
-        // 混合 flags
-        { R"=([.abC].abc)=", Flag::CASELESS | Flag::DOT_NOT_ALL, R"===({S:[{C:"0x2e,A-C,a-c"},{C:"0x00-0x09,0x0b-0x0c,0x0e-0xff"},{C:"A,a"},{C:"B,b"},{C:"C,c"}]})===" },
-
-        // charset
-        { R"=([--]])=",    0,  R"===({S:[{C:"0x2d"},{C:"0x5d"}]})===" },
-        { R"=([%-9])=",    0,  R"===({C:"0x25-9"})===" },
-        { R"=([\x00--])=", 0,  R"===({C:"0x00-0x2d"})===" },
-        { R"=([--9])=",    0,  R"===({C:"0x2d-9"})===" },
-        { R"=([---])=",    0,  R"===({C:"0x2d"})===" },
-
-        // 漏掉一个 '\'
-        { R"=([^\x00-x60\x7b-\xff])=", 0, R"===({C:"y-z"})===" },
-        { R"=([\x00-xff])=",           0, R"===({C:"0x00-x"})===" },
-        { R"=([\x00-x]|f)=",           0, R"===({B:[{C:"0x00-x"},{C:"f"}]})===" },
-
-        // 特殊字符 
-        { R"=(]})=",      0, R"===({S:[{C:"0x5d"},{C:"0x7d"}]})===" },
-        { R"=(.{1,3}})=", 0, R"===({S:[{"L 1,3":[{C:"0x00-0xff"}]},{C:"0x7d"}]})===" },
-
-        // 测试 Seq 合并
-        { R"=(\Qabc\Ed)=", 0, R"===({S:[{C:"a"},{C:"b"},{C:"c"},{C:"d"}]})===" },
-        { R"=(\Qabc\Ed\Qe\E\Qfg\E(hi))=", 0, R"===({S:[{C:"a"},{C:"b"},{C:"c"},{C:"d"},{C:"e"},{C:"f"},{C:"g"},{C:"h"},{C:"i"}]})===" },
-
-        // 测试 Branch 合并
-        { R"=(a|(b|cd)|e)=", 0, R"===({B:[{C:"a"},{C:"b"},{S:[{C:"c"},{C:"d"}]},{C:"e"}]})==="},
-
-        // 注释 (?#  commment )
-        { R"=((?#comment\)a(?#)b(?#comment)c)=", 0, R"===({S:[{C:"a"},{C:"b"},{C:"c"}]})===" },   // 注释中不能包含右括号
-        { R"=((?#)(?#comment))=", 0, R"===()===" },   // 测试空正则
-
-        // \Q..\E
-        { R"=(a\Q\Q{1,2}[a-z]\n\\Eb?)=", 0,
-             R"===({S:[{C:"a"},{C:"0x5c"},{C:"Q"},{C:"0x7b"},{C:"1"},{C:"0x2c"},{C:"2"},{C:"0x7d"},{C:"0x5b"},{C:"a"},{C:"0x2d"},{C:"z"},{C:"0x5d"},{C:"0x5c"},{C:"n"},{C:"0x5c"},{"L 0,1":[{C:"b"}]}]})===" },
-        { R"=(\Qab.c\E)=",               0 | Flag::CASELESS,   R"===({S:[{C:"A,a"},{C:"B,b"},{C:"0x2e"},{C:"C,c"}]})===" },  // 测试忽略大小写
-        { R"=(\Q.*[1-5]\x2E)=",          0,                    R"===({S:[{C:"0x2e"},{C:"0x2a"},{C:"0x5b"},{C:"1"},{C:"0x2d"},{C:"5"},{C:"0x5d"},{C:"0x5c"},{C:"x"},{C:"2"},{C:"E"}]})===" },  // 测试无 \E 右边界
-        { R"=(\Q\E)=",                   0,                    R"===()===" },  // 测试 空串
-        { R"=(\Q)=",                     0,                    R"===()===" },  // 测试无 \E 右边界的 空串
-        { R"=((\Q\E){2,3})=",            0,                    R"===()===" },  // 测试空循环体
-    };
-
-    // TODO Lists:
-    //  1. 合并两个相邻的 Loop ? (有必要?)
-    for (const Case& cs : correct_expressions) {
+    for (const Case& cs : correct_expressions()) {
         reset();
         ctx.m_global_modifiers = cs.flag;
         const std::string script(cs.regex);
@@ -2126,16 +2048,7 @@ void test_regex() {
     }
 
     // 错误的正则表达式用例
-    std::vector<std::pair<std::string, uint32_t>> wrong_expression = {
-        { "a**",       0 }, // nothing to repeat
-        { "a{1,2}??",  0 }, // nothong to repeat
-        { R"=(\x0w)=", 0 }, // 非法的十六进制 : illegal hexadecimal
-        { R"=([a-z][^0-9_123]?????(230-.{,2000})?(230 ).*?\r\n)=", 0 }, // nothing to repeat
-        { R"=(a{3,1})=", 0 }, // m > n : out of order
-        { R"=([7-\r])=", 0 }, // m > n : out of order
-    };
-
-    for (auto&& cs : wrong_expression) {
+    for (auto&& cs : wrong_expressions()) {
         reset();
         ctx.m_global_modifiers = cs.second;
         const std::string script(cs.first);
@@ -2157,7 +2070,585 @@ void test_regex() {
 
     std::cout << "-----------" << std::endl;
 
-} // test_regex
+} // fuction test_regex()
+} // namespace lexpsr
+
+namespace fa {
+
+typedef std::unordered_set<std::string> mermaid_result_t;
+static inline mermaid_result_t format_mermaid_result(const std::string& input_string) {
+    mermaid_result_t ret;
+    std::stringstream ss(input_string);
+    std::string line;
+    while (std::getline(ss, line, '\n')) {
+        if (!ret.insert(std::move(line)).second) {
+            throw("Duplicate state pairs have been found!");
+        }
+    }
+    return ret;
+}
+
+using namespace finite_automata;
+
+int test_case1() {
+    EpsilonNFA eNFA;
+
+    eNFA.move_func(0, epsilon, { 2,3 });
+    eNFA.move_func(0, 'a', { 1 });
+
+    eNFA.move_func(1, 'b', { 2 });
+    eNFA.move_func(2, epsilon, { 0 });
+    eNFA.move_func(2, 'c', { 3 });
+
+    eNFA.move_func(3, epsilon, { 0 });
+
+    eNFA.final_states({ 3 });
+    eNFA.start_state(0);
+
+    std::string mermaid_result = eNFA.to_mermaid("\n");
+    std::cout << std::endl << "e-NFA:" << std::endl;
+    std::cout << mermaid_result << std::endl;
+
+    std::string expected_result = R"==(```mermaid
+graph TD;
+    0(0-S)  -- a --> 1;
+    0(0-S)  -- ε --> 3(3-E);
+    0(0-S)  -- ε --> 2;
+    2  -- ε --> 0(0-S);
+    3(3-E)  -- ε --> 0(0-S);
+    1  -- b --> 2;
+    2  -- c --> 3(3-E);
+```)==";
+
+    TEST_ASSERT(format_mermaid_result(mermaid_result) == format_mermaid_result(expected_result));
+
+    /////////////////
+
+    std::string err;
+    DFA dfa;
+    if (!eNFA.to_dfa(dfa, err))
+    {
+        std::cerr << err << std::endl;
+        return -1;
+    }
+
+    mermaid_result = dfa.to_mermaid("\n");
+    std::cout << "DFA:" << std::endl;
+    std::cout << mermaid_result << std::endl;
+
+    expected_result = R"==(```mermaid
+graph TD;
+    0(0-S-E)  -- c --> 4(4-E);
+    0(0-S-E)  -- a --> 1;
+    4(4-E)  -- a --> 1;
+    1  -- b --> 4(4-E);
+    4(4-E)  -- c --> 4(4-E);
+```)==";
+
+    TEST_ASSERT(format_mermaid_result(mermaid_result) == format_mermaid_result(expected_result));
+    return 0;
+}
+
+int test_case2() {
+    std::cout << std::endl << "-------" << std::endl << R"==(`/((ab)*c)*/`)==" << std::endl;
+
+    EpsilonNFA eNFA; //  regex: /((ab)*c)*/
+
+    eNFA.move_func(0, epsilon, { 1, 8 });
+    eNFA.move_func(1, epsilon, { 2, 5 });
+
+    eNFA.move_func(2, 'a', { 3 });
+    eNFA.move_func(3, 'b', { 4 });
+
+    eNFA.move_func(4, epsilon, { 5 });
+
+    eNFA.move_func(5, epsilon, { 1, 6 });
+
+    eNFA.move_func(6, 'c', { 7 });
+    eNFA.move_func(7, epsilon, { 8 });
+    eNFA.move_func(8, epsilon, { 0 });
+
+    eNFA.final_states({ 8 });
+    eNFA.start_state(0);
+
+    std::string mermaid_result = eNFA.to_mermaid("\n");
+    std::cout << std::endl << "e-NFA:" << std::endl;
+    std::cout << mermaid_result << std::endl;
+
+    std::string expected_result = R"==(```mermaid
+graph TD;
+    0(0-S)  -- ε --> 8(8-E);
+    0(0-S)  -- ε --> 1;
+    4  -- ε --> 5;
+    8(8-E)  -- ε --> 0(0-S);
+    1  -- ε --> 2;
+    1  -- ε --> 5;
+    5  -- ε --> 1;
+    2  -- a --> 3;
+    3  -- b --> 4;
+    5  -- ε --> 6;
+    6  -- c --> 7;
+    7  -- ε --> 8(8-E);
+```)==";
+
+    TEST_ASSERT(format_mermaid_result(mermaid_result) == format_mermaid_result(expected_result));
+
+    /////////////////
+
+    std::string err;
+    DFA dfa;
+    if (!eNFA.to_dfa(dfa, err))
+    {
+        std::cerr << err << std::endl;
+        return -1;
+    }
+
+    mermaid_result = dfa.to_mermaid("\n");
+    std::cout << "DFA:" << std::endl;
+    std::cout << mermaid_result << std::endl;
+
+    expected_result = R"==(```mermaid
+graph TD;
+    0(0-S-E)  -- c --> 10(10-E);
+    0(0-S-E)  -- a --> 3;
+    9  -- c --> 10(10-E);
+    9  -- a --> 3;
+    3  -- b --> 9;
+    10(10-E)  -- a --> 3;
+    10(10-E)  -- c --> 10(10-E);
+```)==";
+
+    TEST_ASSERT(format_mermaid_result(mermaid_result) == format_mermaid_result(expected_result));
+    return 0;
+}
+
+int test_case3() {
+    std::cout << std::endl << "-------" << std::endl << R"==(`/((ab)*c)*(ab)*/`)==" << std::endl;
+
+    EpsilonNFA eNFA; //  regex: /((ab)*c)*(ab)*/
+
+    eNFA.move_func(0, epsilon, { 1, 8 });
+    eNFA.move_func(1, epsilon, { 2, 5 });
+
+    eNFA.move_func(2, 'a', { 3 });
+    eNFA.move_func(3, 'b', { 4 });
+
+    eNFA.move_func(4, epsilon, { 5 });
+
+    eNFA.move_func(5, epsilon, { 1, 6 });
+
+    eNFA.move_func(6, 'c', { 7 });
+    eNFA.move_func(7, epsilon, { 8 });
+    eNFA.move_func(8, epsilon, { 0, 9 });
+
+    eNFA.move_func(9, epsilon, { 10, 13 });
+    eNFA.move_func(10, 'a', { 11 });
+    eNFA.move_func(11, 'b', { 12 });
+    eNFA.move_func(12, epsilon, { 13 });
+    eNFA.move_func(13, epsilon, { 9 });
+
+    eNFA.final_states({ 13 });
+    eNFA.start_state(0);
+
+    std::string mermaid_result = eNFA.to_mermaid("\n");
+    std::cout << std::endl << "e-NFA:" << std::endl;
+    std::cout << mermaid_result << std::endl;
+
+    std::string expected_result = R"==(```mermaid
+graph TD;
+    0(0-S)  -- ε --> 8;
+    0(0-S)  -- ε --> 1;
+    4  -- ε --> 5;
+    8  -- ε --> 0(0-S);
+    1  -- ε --> 2;
+    1  -- ε --> 5;
+    5  -- ε --> 1;
+    2  -- a --> 3;
+    3  -- b --> 4;
+    5  -- ε --> 6;
+    6  -- c --> 7;
+    7  -- ε --> 8;
+    8  -- ε --> 9;
+    9  -- ε --> 10;
+    13(13-E)  -- ε --> 9;
+    9  -- ε --> 13(13-E);
+    10  -- a --> 11;
+    11  -- b --> 12;
+    12  -- ε --> 13(13-E);
+```)==";
+
+    TEST_ASSERT(format_mermaid_result(mermaid_result) == format_mermaid_result(expected_result));
+
+    /////////////////
+
+    std::string err;
+    DFA dfa;
+    if (!eNFA.to_dfa(dfa, err))
+    {
+        std::cerr << err << std::endl;
+        return -1;
+    }
+
+    mermaid_result = dfa.to_mermaid("\n");
+    std::cout << "DFA:" << std::endl;
+    std::cout << mermaid_result << std::endl;
+
+    expected_result = R"==(```mermaid
+graph TD;
+    0(0-S-E)  -- c --> 16(16-E);
+    0(0-S-E)  -- a --> 14;
+    16(16-E)  -- a --> 14;
+    15(15-E)  -- a --> 14;
+    14  -- b --> 15(15-E);
+    15(15-E)  -- c --> 16(16-E);
+    16(16-E)  -- c --> 16(16-E);
+```)==";
+
+    TEST_ASSERT(format_mermaid_result(mermaid_result) == format_mermaid_result(expected_result));
+
+    dfa.try_minimize();
+    mermaid_result = dfa.to_mermaid("\n");
+    std::cout << "minimized DFA: " << std::endl << mermaid_result << std::endl;
+
+    expected_result = R"==(```mermaid
+graph TD;
+    0(0-S-E)  -- c --> 0(0-S-E);
+    0(0-S-E)  -- a --> 14;
+    14  -- b --> 0(0-S-E);
+```)==";
+    TEST_ASSERT(format_mermaid_result(mermaid_result) == format_mermaid_result(expected_result));
+
+
+    {
+        EpsilonNFA eNFA2;
+        eNFA2.move_func(0, 'a', { 1 });
+        eNFA2.move_func(0, 'c', { 5 });
+
+        eNFA2.move_func(5, 'c', { 5 });
+        eNFA2.move_func(5, 'a', { 1 });
+
+        eNFA2.move_func(1, 'b', { 2 });
+        eNFA2.move_func(2, 'c', { 3 });
+        eNFA2.move_func(2, 'a', { 1 });
+
+        eNFA2.move_func(3, 'c', { 4 });
+        eNFA2.move_func(3, 'a', { 1 });
+        eNFA2.move_func(4, 'c', { 4 });
+        eNFA2.move_func(4, 'a', { 1 });
+
+        eNFA2.final_states({0,2,3,4,5});
+        eNFA2.start_state(0);
+
+        std::string s1 = eNFA2.to_mermaid();
+        std::string err2;
+        DFA dfa2;
+        if (!eNFA2.to_dfa(dfa2, err))
+        {
+            std::cerr << err2 << std::endl;
+            return -1;
+        }
+        std::string s2 = dfa2.to_mermaid();
+        dfa2.try_minimize();
+        std::string s3 = dfa2.to_mermaid();
+
+        std::cout << "e-NFA: " << std::endl << s1 << std::endl;
+        std::cout << "DFA: " << std::endl << s2 << std::endl;
+        std::cout << "minimized DFA: " << std::endl << s3 << std::endl;
+
+        // expected : mermaid_result == s3
+
+        TEST_ASSERT(dfa2.is_same_shape_mut(dfa));
+    }
+
+    return 0;
+}
+
+int test_case4() {
+    std::cout << std::endl << "-------" << std::endl << R"==(`/[a-c]*ab/`)==" << std::endl;
+
+    EpsilonNFA eNFA; //
+
+    eNFA.move_func(0, epsilon, { 1 });
+    eNFA.move_func(0, 'a', { 0 });
+    eNFA.move_func(0, 'b', { 0 });
+    eNFA.move_func(0, 'c', { 0 });
+
+    eNFA.move_func(1, 'a', { 2 });
+    eNFA.move_func(2, 'b', { 3 });
+
+    eNFA.final_states({ 3 });
+    eNFA.start_state(0);
+
+    std::string mermaid_result = eNFA.to_mermaid("\n");
+    std::cout << std::endl << "e-NFA:" << std::endl;
+    std::cout << mermaid_result << std::endl;
+
+    std::string expected_result = R"==(```mermaid
+graph TD;
+    0(0-S)  -- [a-c] --> 0(0-S);
+    0(0-S)  -- ε --> 1;
+    1  -- a --> 2;
+    2  -- b --> 3(3-E);
+```)==";
+
+    TEST_ASSERT(mermaid_result == expected_result);
+
+    /////////////////
+
+    std::string err;
+    DFA dfa;
+    if (!eNFA.to_dfa(dfa, err))
+    {
+        std::cerr << err << std::endl;
+        return -1;
+    }
+
+    mermaid_result = dfa.to_mermaid("\n");
+    std::cout << "DFA:" << std::endl;
+    std::cout << mermaid_result << std::endl;
+
+    expected_result = R"==(```mermaid
+graph TD;
+    0(0-S)  -- [b-c] --> 6;
+    0(0-S)  -- a --> 4;
+    6  -- [b-c] --> 6;
+    4  -- a --> 4;
+    4  -- b --> 5(5-E);
+    5(5-E)  -- a --> 4;
+    5(5-E)  -- [b-c] --> 6;
+    6  -- a --> 4;
+    4  -- c --> 6;
+```)==";
+
+    TEST_ASSERT(format_mermaid_result(mermaid_result) == format_mermaid_result(expected_result));
+
+    dfa.try_minimize();
+    mermaid_result = dfa.to_mermaid("\n");
+    std::cout << "minimize DFA:" << std::endl;
+    std::cout << mermaid_result << std::endl;
+
+    expected_result = R"==(```mermaid
+graph TD;
+    0(0-S)  -- [b-c] --> 0(0-S);
+    0(0-S)  -- a --> 4;
+    4  -- c --> 0(0-S);
+    4  -- a --> 4;
+    5(5-E)  -- a --> 4;
+    4  -- b --> 5(5-E);
+    5(5-E)  -- [b-c] --> 0(0-S);
+```)==";
+
+    TEST_ASSERT(format_mermaid_result(mermaid_result) == format_mermaid_result(expected_result));
+
+    return 0;
+}
+
+int test_case5() {
+    EpsilonNFA eNFA;
+    eNFA.move_func(0, 'a', { 1,2 });
+    eNFA.move_func(1, 'b', { 1 });
+    eNFA.move_func(1, 'd', { 3 });
+    eNFA.move_func(2, 'c', { 3 });
+    eNFA.move_func(3, 'e', { 4 });
+
+    eNFA.final_states({ 4 });
+    eNFA.start_state(0);
+    std::string mermaid_result = eNFA.to_mermaid("\n");
+    std::cout << std::endl << "e-NFA:" << std::endl;
+    std::cout << mermaid_result << std::endl;
+
+    std::string expected_result = R"==(```mermaid
+graph TD;
+    0(0-S)  -- a --> 2;
+    0(0-S)  -- a --> 1;
+    1  -- b --> 1;
+    1  -- d --> 3;
+    2  -- c --> 3;
+    3  -- e --> 4(4-E);
+```)==";
+
+    TEST_ASSERT(format_mermaid_result(mermaid_result) == format_mermaid_result(expected_result));
+
+    //////////
+
+    std::string err;
+    DFA dfa;
+    if (!eNFA.to_dfa(dfa, err))
+    {
+        std::cerr << err << std::endl;
+        return -1;
+    }
+
+    mermaid_result = dfa.to_mermaid("\n");
+    std::cout << "DFA:" << std::endl;
+    std::cout << mermaid_result << std::endl;
+
+    expected_result = R"==(```mermaid
+graph TD;
+    0(0-S)  -- a --> 5;
+    5  -- b --> 1;
+    1  -- b --> 1;
+    1  -- d --> 3;
+    3  -- e --> 4(4-E);
+    5  -- [c-d] --> 3;
+```)==";
+
+    TEST_ASSERT(format_mermaid_result(mermaid_result) == format_mermaid_result(expected_result));
+
+
+    dfa.try_minimize();
+    mermaid_result = dfa.to_mermaid("\n");
+    std::cout << "minimize DFA:" << std::endl;
+    std::cout << mermaid_result << std::endl;
+
+    expected_result = R"==(```mermaid
+graph TD;
+    0(0-S)  -- a --> 5;
+    5  -- b --> 1;
+    1  -- b --> 1;
+    1  -- d --> 3;
+    3  -- e --> 4(4-E);
+    5  -- [c-d] --> 3;
+```)==";
+
+    TEST_ASSERT(format_mermaid_result(mermaid_result) == format_mermaid_result(expected_result));
+
+    return 0;
+}
+
+int test_case6() {
+    EpsilonNFA eNFA;
+    eNFA.move_func(0, 'a', { 1 });
+    eNFA.move_func(1, 'a', { 2 });
+    eNFA.move_func(2, 'a', { 3 });
+    eNFA.move_func(3, 'a', { 4 });
+    eNFA.move_func(4, 'a', { 1 });
+    eNFA.move_func(3, 'a', { 5 });
+
+    eNFA.final_states({ 5 });
+    eNFA.start_state(0);
+    std::string mermaid_result = eNFA.to_mermaid("\n");
+    std::cout << std::endl << "e-NFA:" << std::endl;
+    std::cout << mermaid_result << std::endl;
+
+    std::string expected_result = R"==(```mermaid
+graph TD;
+    0(0-S)  -- a --> 1;
+    1  -- a --> 2;
+    4  -- a --> 1;
+    2  -- a --> 3;
+    3  -- a --> 4;
+    3  -- a --> 5(5-E);
+```)==";
+
+    TEST_ASSERT(format_mermaid_result(mermaid_result) == format_mermaid_result(expected_result));
+
+    std::string err;
+    DFA dfa;
+    if (!eNFA.to_dfa(dfa, err))
+    {
+        std::cerr << err << std::endl;
+        return -1;
+    }
+
+    mermaid_result = dfa.to_mermaid("\n");
+    std::cout << "DFA:" << std::endl;
+    std::cout << mermaid_result << std::endl;
+
+    expected_result = R"==(```mermaid
+graph TD;
+    0(0-S)  -- a --> 1;
+    3  -- a --> 6(6-E);
+    1  -- a --> 2;
+    2  -- a --> 3;
+    6(6-E)  -- a --> 1;
+```)==";
+
+    TEST_ASSERT(format_mermaid_result(mermaid_result) == format_mermaid_result(expected_result));
+
+
+    dfa.try_minimize();
+    mermaid_result = dfa.to_mermaid("\n");
+    std::cout << "minimize DFA:" << std::endl;
+    std::cout << mermaid_result << std::endl;
+    TEST_ASSERT(format_mermaid_result(mermaid_result) == format_mermaid_result(expected_result));
+    return 0;
+}
+
+int test_case7() { // 测试移除死状态 (目前这个case还不能通过！！)
+    EpsilonNFA eNFA;
+    eNFA.move_func(0, 'a', { 1 });
+    eNFA.move_func(0, 'b', { 2 });
+    eNFA.move_func(2, 'a', { 3 });
+    eNFA.move_func(3, 'a', { 4 });
+    eNFA.move_func(4, 'a', { 5 });
+    eNFA.move_func(4, 'b', { 4 });
+    eNFA.move_func(5, 'c', { 3 });
+    eNFA.move_func(5, 'a', { 6 });
+    eNFA.move_func(7, 'a', { 0 }); // 7 状态目前可以被移除
+    eNFA.move_func(7, 'a', { 1 });
+
+    eNFA.final_states({ 1 });
+    eNFA.start_state(0);
+    std::string mermaid_result = eNFA.to_mermaid("\n");
+    std::cout << std::endl << "e-NFA:" << std::endl;
+    std::cout << mermaid_result << std::endl;
+
+    std::string expected_result = R"==(```mermaid
+graph TD;
+    0(0-S)  -- b --> 2;
+    0(0-S)  -- a --> 1(1-E);
+    2  -- a --> 3;
+    4  -- a --> 5;
+    5  -- a --> 6;
+    4  -- b --> 4;
+    5  -- c --> 3;
+    7  -- a --> 1(1-E);
+    3  -- a --> 4;
+    7  -- a --> 0(0-S);
+```)==";
+
+    TEST_ASSERT(format_mermaid_result(mermaid_result) == format_mermaid_result(expected_result));
+
+    std::string err;
+    DFA dfa;
+    if (!eNFA.to_dfa(dfa, err))
+    {
+        std::cerr << err << std::endl;
+        return -1;
+    }
+
+    mermaid_result = dfa.to_mermaid("\n");
+    std::cout << "DFA:" << std::endl;
+    std::cout << mermaid_result << std::endl;
+
+    expected_result = R"==(```mermaid
+graph TD;
+    0(0-S)  -- a --> 1(1-E);
+```)==";
+
+    TEST_EXPECT(format_mermaid_result(mermaid_result) == format_mermaid_result(expected_result));
+    return 0;
+}
+
+int run_all_tests() {
+    // https://www.mermaidflow.app/editor#/
+    // https://mermaid.live/edit
+    int ret = 0;
+
+    ret = test_case1(); TEST_ASSERT(0 == ret);
+    ret = test_case2(); TEST_ASSERT(0 == ret);
+    ret = test_case3(); TEST_ASSERT(0 == ret);
+    ret = test_case4(); TEST_ASSERT(0 == ret);
+    ret = test_case5(); TEST_ASSERT(0 == ret);
+    ret = test_case6(); TEST_ASSERT(0 == ret);
+    ret = test_case7(); TEST_EXPECT(0 == ret); /// <<-----
+    return 0;
+}
+
+} // namespace fa
+} // namespace tests
+
 
 
 
@@ -2225,13 +2716,13 @@ namespace to_wasm {
         return resultObj; // Return the object
     }
 
-	static inline uint32_t CalcModifiers(bool caseless, bool non_greedy, bool dot_not_all) {
-	    uint32_t ret = regex::Flag::DEFAULT;
-		if (caseless)    { ret |= regex::Flag::CASELESS; }
-		if (non_greedy)  { ret |= regex::Flag::NON_GREEDY; }
-		if (dot_not_all) { ret |= regex::Flag::DOT_NOT_ALL; }
-		return ret;
-	}
+    static inline uint32_t CalcModifiers(bool caseless, bool non_greedy, bool dot_not_all) {
+        uint32_t ret = regex::Flag::DEFAULT;
+        if (caseless)    { ret |= regex::Flag::CASELESS; }
+        if (non_greedy)  { ret |= regex::Flag::NON_GREEDY; }
+        if (dot_not_all) { ret |= regex::Flag::DOT_NOT_ALL; }
+        return ret;
+	  }
 
 } // to_wasm
 EMSCRIPTEN_BINDINGS(my_module) {
@@ -2266,8 +2757,9 @@ EMSCRIPTEN_BINDINGS(my_module) {
 #else
 int main()
 {
-    test_regex2();
-    test_regex();
+    tests::lexpsr::test_regex2();
+    tests::lexpsr::test_regex();
+    tests::fa::run_all_tests();
     return 0;
 }
 #endif // __EMSCRIPTEN__
