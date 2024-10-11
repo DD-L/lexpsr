@@ -108,12 +108,23 @@ static constexpr inline bool valid_edge(Edge e) {
 
 template <class T>
 static inline ordered_unique_vec<T>& make_ordered_unique_mut_vec(std::vector<T>& vec) {
-    if (vec.size() > 1u) {
+    const std::size_t siz = vec.size();
+    if (siz > 2u) {
         std::sort(vec.begin(), vec.end());
         auto last = std::unique(vec.begin(), vec.end());
         assert(vec.begin() <= last);
         const std::size_t size = std::distance(vec.begin(), last);
         vec.resize(size);
+    }
+    else if (siz == 2u) {
+       T& v1 = vec.front();
+       T& v2 = vec.back();
+       if (v1 > v2) {
+          std::swap(v1, v2);
+       }
+       else if (v1 == v2) {
+          vec.pop_back();
+       }
     }
     return static_cast<ordered_unique_vec<T>&>(vec);
 }
@@ -218,7 +229,7 @@ namespace details {
                 is_closed = false;
                 if (edge != last_edge + 1) {
                     if (invalid_last_edge != last_edge) {
-                        if (range_begin != last_edge) {
+                        if (range_begin != last_edge) { // if (last_edge - range_begin > 1) {
                             ret += ("-" + get_edge_string(last_edge));
                         }
                     }
@@ -230,7 +241,7 @@ namespace details {
             }
 
             if (!is_closed && valid_edge(last_edge)) {
-                if (range_begin != last_edge) {
+                if (range_begin != last_edge) { // if (last_edge - range_begin > 1) {
                     ret += ("-" + get_edge_string(last_edge));
                 }
             }
@@ -537,9 +548,11 @@ private:
         const bool target_structure_is_state_pair_map = policy.target_structure_is_state_pair_map();
         const bool target_structure_is_move_functions = policy.target_structure_is_move_functions();
 
+        std::unordered_set<state_pair_map_t::mapped_type*> needs_order_edges;
         for (auto&& pair : m_state_pair_map) {
             const state_from_to_t& from_to_state = pair.first;
             const ordered_unique_vec<Edge>& edges = pair.second;
+            assert(!edges.empty());
 
             State new_state_1 = from_to_state.s1;
             State new_state_2 = from_to_state.s2;
@@ -560,7 +573,14 @@ private:
             }
 
             if (target_structure_is_state_pair_map) {
-                new_state_pair_map.insert({ state_from_to_t{new_state_1, new_state_2}, edges });
+                state_pair_map_t::mapped_type& mapped = new_state_pair_map[state_from_to_t{new_state_1, new_state_2}]; // maybe insert
+                if (mapped.empty()) {
+                    mapped = edges;
+                }
+                else { // 对于同一个 key, 这个分支可能会被进来多次，比如  0-a->1; 0->b->2; 0-c->3; s = 0, f = {1,2,3}
+                    mapped.insert(mapped.end(), edges.begin(), edges.end()); // 后面集中 make order
+                    needs_order_edges.insert(&mapped);
+                }
             }
 
             if (target_structure_is_move_functions) {
@@ -569,6 +589,11 @@ private:
                     edge_to_state[edge] = new_state_2;
                 }
             }
+        }
+
+        for (state_pair_map_t::mapped_type* edges : needs_order_edges) { // 集中 make order edges
+            assert(nullptr != edges);
+            make_ordered_unique_mut_vec(*edges);
         }
 
         for (auto&& pair : state_replacement_table) {
