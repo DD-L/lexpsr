@@ -53,6 +53,18 @@ namespace regex {
 
         public:
             Node(NodeType type, const StrRef& tok, UnionData union_data = UnionData()) : m_context(tok), m_union_data(union_data), m_type(type) {}
+
+            bool IsBranch() const { return NodeType::Branch == m_type; }
+            bool IsSequence() const { return NodeType::Sequence == m_type; }
+            bool IsLoop() const { return NodeType::Loop == m_type; }
+            bool IsCharSet() const { return NodeType::CharSet == m_type; }
+
+            bool IsInfiniteLoop() const { // 是否为无限循环
+                if (IsLoop()) {
+                    return _LEXPARSER_CORE::Loop::INF_CNT == m_union_data.m_loop_flag.m_range.second; // max_loop
+                }
+                return false;
+            }
         }; // struct Node
 
         class CharSet final {
@@ -489,7 +501,7 @@ namespace regex {
                 }
 
                 const auto& min_cnt = loop_flag.m_range.first;
-                const auto & max_cnt = loop_flag.m_range.second;
+                const auto& max_cnt = loop_flag.m_range.second;
                 assert(min_cnt <= max_cnt);
                 if (min_cnt > 0xffffu) {
                     err = "Currently, the number of deterministic loops exceeding 65535 is not supported.";
@@ -503,24 +515,105 @@ namespace regex {
                         return false;
                     }
                 }
+                /*
+                auto need_add_new_begin_end = [&]() -> std::pair<bool, bool> {
+                    if (0 == min_cnt || _LEXPARSER_CORE::Loop::INF_CNT == max_cnt) { // 只有在0次或无限循环下才需要考虑新增 begin 或 end 节点
+                        return { true, true };  // <--- 细分不必要添加新状态的情况，太过困难，索性都统一加 begin end 新状态！！！
 
-                finite_automata::State begin = ctx.current_state();
-                if (_LEXPARSER_CORE::Loop::INF_CNT == max_cnt) {
+                        if (!body->IsLoop() && !body->IsCharSet()) {
+                            if (body->IsBranch()) {
+                                for (const RegexAST::Node* member : body->m_member) {
+                                    if (member->IsInfiniteLoop()) { return { true, true }; }
+                                }
+                                return { false, false };
+                            }
+
+                            if (body->IsSequence() && !body->m_member.empty()) {
+                                const bool first_is_infinite_loop = body->m_member.front()->IsInfiniteLoop();
+                                const bool last_is_infinite_loop  = body->m_member.back()->IsInfiniteLoop();
+                                if (first_is_infinite_loop || last_is_infinite_loop) {
+                                    if (first_is_infinite_loop && last_is_infinite_loop) {
+                                        for (auto it = std::next(body->m_member.begin()), end_iter = std::prev(body->m_member.end()); it < end_iter; ++it) {
+                                            if (!(*it)->IsInfiniteLoop()) {
+                                                return { first_is_infinite_loop, last_is_infinite_loop }; // case:   (a*bc*)*
+                                            }
+                                        }
+                                        return { false, false }; // 如果序列里全是无限循环，则也不用新增节点. case (a*b*c*)*     (a+b*c+)*
+                                    }
+                                    return { first_is_infinite_loop, last_is_infinite_loop }; // case:   (a*b)*    (ab*)* 
+                                }
+                                else {
+                                    assert(!first_is_infinite_loop && !last_is_infinite_loop);
+                                    return { false, false }; // case   (a{0,4}b)*   (ba{0,4})*     (ab*c)*
+                                }
+                            }
+
+                            return { true, true }; // 兜底保证正确性
+                        }
+                        else if (body->IsLoop() && !body->IsInfiniteLoop()) {
+                            return { true, true }; // case  ((ba*){0,4})*     ((b*a){0,4})*   <--- fix BUG
+                        } // case: ((ab)*)*
+                    }
+
+                    return { false, false };
+                };
+                */
+                auto add_new_state = [](finite_automata::EpsilonNFA& _enfa, ToEpsilonNFAContext& _ctx) {
+                    finite_automata::State new_state = _ctx.apply_new_state();
+                    _enfa.move_func(_ctx.current_state(), finite_automata::epsilon, { new_state });
+                    _ctx.current_state(new_state);
+                };
+
+                const finite_automata::State begin = ctx.current_state();
+                if (_LEXPARSER_CORE::Loop::INF_CNT == max_cnt) { // 无限循环
+                    //const auto need_add_new_state = need_add_new_begin_end();
+
+                    //if (need_add_new_state.first) {
+                    //    finite_automata::State new_state = ctx.apply_new_state();
+                    //    enfa.move_func(ctx.current_state(), finite_automata::epsilon, { new_state });
+                    //    ctx.current_state(new_state);
+                    //}
+                    add_new_state(enfa, ctx);
+
                     if (!ToEpsilonNFAImpl(body, enfa, ctx, err)) {
                         return false;
                     }
+
+                    //if (need_add_new_state.second) {
+                    //    finite_automata::State new_state = ctx.apply_new_state();
+                    //    enfa.move_func(ctx.current_state(), finite_automata::epsilon, { new_state });
+                    //    ctx.current_state(new_state);
+                    //}
+                    add_new_state(enfa, ctx);
+
                     enfa.move_func(ctx.current_state(), finite_automata::epsilon, { begin });
                     enfa.move_func(begin, finite_automata::epsilon, { ctx.current_state() });
                     return true;
                 }
 
+                if (0 == min_cnt) {
+                    if (0 == max_cnt) {
+                        return true; // 循环 0 次什么都不用做
+                    }
+                    add_new_state(enfa, ctx);
+                }
+
                 // 剩余最多循环 max_cnt - min_cnt 次
-                for (std::size_t i = 0; i < (max_cnt - min_cnt); ++i) {
-                    if (!ToEpsilonNFAImpl(body, enfa, ctx, err)) { // 注意：这个循环可以利用 nfa + nfa + ... 进行性能优化 @TODO
-                        return false;
+                if (min_cnt < max_cnt) {
+                    for (std::size_t i = 0; i < (max_cnt - min_cnt); ++i) {
+                        if (!ToEpsilonNFAImpl(body, enfa, ctx, err)) { // 注意：这个循环可以利用 nfa + nfa + ... 进行性能优化 @TODO
+                            return false;
+                        }
+                        if (0 == min_cnt) { // case ((ab*){0,2})*
+                            add_new_state(enfa, ctx);
+                        }
+                        enfa.move_func(begin, finite_automata::epsilon, { ctx.current_state() });
                     }
                 }
-                enfa.move_func(begin, finite_automata::epsilon, { ctx.current_state() });
+                else {
+                    enfa.move_func(begin, finite_automata::epsilon, { ctx.current_state() });
+                }
+
                 return true;
             }
             default:
