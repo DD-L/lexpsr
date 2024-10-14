@@ -2725,7 +2725,7 @@ graph TD;
 }
 
 int test_case8() {
-    EpsilonNFA eNFA; // (ab|c)?[abc]+
+    EpsilonNFA eNFA; // a|b
     eNFA.move_func(0, 'a', { 1 });
     eNFA.move_func(0, 'b', { 2 });
 
@@ -2855,6 +2855,103 @@ graph TD;
     return 0;
 }
 
+int test_case10() {
+
+    auto test = [](const EpsilonNFA& eNFA, const std::string& nfa_expected_result, const std::string& dfa_expected_result) {
+        std::string mermaid_result = eNFA.to_mermaid("\n");
+        std::cout << std::endl << "e-NFA:" << std::endl;
+        std::cout << mermaid_result << std::endl;
+
+        TEST_ASSERT(format_mermaid_result(mermaid_result) == format_mermaid_result(nfa_expected_result));
+
+        std::string err;
+        DFA dfa;
+        if (!eNFA.to_dfa(dfa, err))
+        {
+            std::cerr << err << std::endl;
+            return -1;
+        }
+
+        mermaid_result = dfa.to_mermaid("\n");
+        std::cout << "DFA:" << std::endl;
+        std::cout << mermaid_result << std::endl;
+
+        TEST_ASSERT(format_mermaid_result(mermaid_result) == format_mermaid_result(dfa_expected_result));
+        TEST_ASSERT(dfa.is_start_state(0));
+        TEST_ASSERT(dfa.is_final_state(0));
+
+
+        dfa.try_minimize();
+        mermaid_result = dfa.to_mermaid("\n");
+        std::cout << "minimize DFA:" << std::endl;
+        std::cout << mermaid_result << std::endl;
+
+        TEST_ASSERT(format_mermaid_result(mermaid_result) == format_mermaid_result(dfa_expected_result));
+        TEST_ASSERT(dfa.is_start_state(0));
+        TEST_ASSERT(dfa.is_final_state(0));
+        return 0;
+    };
+
+    {
+        EpsilonNFA eNFA; // a{0,0}
+        eNFA.final_states({ 0 });
+        eNFA.start_state(0);
+
+        const std::string expected_result = R"==(```mermaid
+graph TD;
+```)==";
+        TEST_ASSERT(0 == test(eNFA, expected_result, expected_result));
+        TEST_ASSERT(eNFA.is_start_state(0));
+        TEST_ASSERT(eNFA.is_final_state(0));
+    }
+
+    {
+        EpsilonNFA eNFA;
+        eNFA.move_func(0, epsilon, { 1 });
+        eNFA.move_func(1, epsilon, { 2 });
+
+        eNFA.final_states({ 2 });
+        eNFA.start_state(0);
+
+        const std::string nfa_expected_result = R"==(```mermaid
+graph TD;
+    0(0-S)  -- ε --> 1;
+    1  -- ε --> 2(2-E);
+```)==";
+
+        const std::string dfa_expected_result = R"==(```mermaid
+graph TD;
+```)==";
+        TEST_ASSERT(0 == test(eNFA, nfa_expected_result, dfa_expected_result));
+        TEST_ASSERT(eNFA.is_start_state(0));
+        TEST_ASSERT(eNFA.is_final_state(2));
+    }
+
+    {
+        EpsilonNFA eNFA;
+        eNFA.move_func(0, epsilon, { 0 });
+        eNFA.move_func(0, 'a', { 0 });
+        eNFA.move_func(0, 'b', { 0 });
+        eNFA.move_func(0, 'c', { 0 });
+        eNFA.final_states({ 0 });
+        eNFA.start_state(0);
+
+        const std::string expected_result = R"==(```mermaid
+graph TD;
+    0(0-S-E)  -- [a-c] --> 0(0-S-E);
+```)==";
+        TEST_ASSERT(0 == test(eNFA, expected_result, expected_result));
+        TEST_ASSERT(eNFA.is_start_state(0));
+        TEST_ASSERT(eNFA.is_final_state(0));
+    }
+
+    return 0;
+}
+
+//int test_case11() {
+//
+//}
+
 int run_all_tests() {
     // https://www.mermaidflow.app/editor#/
     // https://mermaid.live/edit
@@ -2869,6 +2966,8 @@ int run_all_tests() {
     ret = test_case7(); TEST_EXPECT(0 == ret); /// <<-----
     ret = test_case8(); TEST_ASSERT(0 == ret);
     ret = test_case9(); TEST_ASSERT(0 == ret);
+    ret = test_case10(); TEST_ASSERT(0 == ret);
+    //ret = test_case11(); TEST_ASSERT(0 == ret);
     return 0;
 }
 

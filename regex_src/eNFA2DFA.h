@@ -1138,6 +1138,17 @@ namespace details {
         }
 
         bool to_dfa(DFA& dfa, std::string& err) {
+            if ((m_dfa_move_functions.empty() || m_state_pair_map.empty())
+                && invalid_state != m_start_state && m_dfa_final_states.size() == 1u) { // is_single_state
+                if (m_dfa_final_states.end() == m_dfa_final_states.find(m_start_state)) {
+                    err = "invalid dfa_aux, missing the final state!";
+                    return false;
+                }
+
+                dfa.reset(m_start_state, {}, { m_start_state }, { m_start_state }, {});
+                return true;
+            }
+
             std::unordered_set<State> dfa_state_set = m_dfa_state_map.get_all_dfa_states();
             if (invalid_state == m_start_state || m_dfa_final_states.empty() || m_state_pair_map.empty()
                 || dfa_state_set.empty() || m_dfa_move_functions.empty()) {
@@ -1328,11 +1339,15 @@ public:
 
     void final_states(const std::vector<State>& s) {
         m_final_states.ordered_assgin_vec(s);
+        m_input_states.ordered_insert(m_final_states);
     }
 
     void start_state(State s0) {
         assert(invalid_state != s0);
         m_start_state = s0;
+        if (!m_input_states.binary_search(s0)) {
+            m_input_states.ordered_push(s0);
+        }
     }
 
     bool has_epsilon() const {
@@ -1375,6 +1390,25 @@ public:
             err = "Illegal initial state!";
             return false;
         }
+
+        if (m_input_states.empty()) {
+            err = "The state set of nfa is empty!";
+            return true;
+        }
+
+        if (m_input_states.size() == 1u) {
+            if (!is_final_state(m_start_state)) {
+                err = "invalid nfa: the final state is missing, expect `" +  get_state_name(m_start_state) + "`";
+                return false;
+            }
+
+            if (m_move_func.empty()) { // 只有一个状态并且起点就是终点，且没有出边
+                dfa.reset(m_start_state, details::state_pair_map_t{}, ordered_unique_vec<State>{m_start_state},
+                    std::unordered_set<State>{m_start_state}, details::dfa_move_functions_t{});
+                return true;
+            } // else 可以交给 to_dfa_aux() 处理
+        }
+
         err.clear();
         DFAAux2 dfa_aux;
         if (!to_dfa_aux(dfa_aux, err)) {
@@ -1406,7 +1440,7 @@ private:
 
     bool make_dfa_transition_table(DFAAux2& dfa_aux, std::string& err) const {
         assert(invalid_state != dfa_aux.m_start_state);
-        return dfa_aux_move_each_edge({ dfa_aux.m_start_state }, dfa_aux, err); // 这样递归下去的一定都是可达状态
+        return dfa_aux_move_each_edge({ dfa_aux.m_start_state }, dfa_aux, err); // 这样递归下去的一定都是从起点出发的可达状态，但不保证能到叶子节点是终点！！！
     } // make_dfa_transition_table
 
     bool dfa_aux_move_each_edge(const ordered_unique_vec<State>& dfa_aux_from_state, DFAAux2& dfa_aux, std::string& err) const {
